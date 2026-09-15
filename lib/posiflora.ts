@@ -1,8 +1,13 @@
+import { randomUUID } from "node:crypto";
+
+import { contactMethodLabels, type OrderInput } from "./schema";
+import { site } from "./site";
+
 /**
  * Клиент Posiflora API (JSON:API).
  *
- * Здесь только слой сессии: логин по паре username/password, кэш access-токена
- * и его продление по refresh-токену. Создание заказа лежит в `createOrder`.
+ * Слой сессии (логин по паре username/password, кэш access-токена и его
+ * продление по refresh-токену) плюс создание заказа — `createPosifloraOrder`.
  */
 
 /** Posiflora отвечает 415, если прислать обычный application/json. */
@@ -216,3 +221,194 @@ export function invalidateSession(): void {
   session = null;
 }
 
+
+/** Что вернулось из Posiflora после создания заказа. */
+export type PosifloraOrder = {
+  id: string;
+  /** Номер документа, который видит менеджер в интерфейсе. */
+  docNo: string | null;
+  status: string | null;
+};
+
+/**
+ * `disabled` — интеграция не настроена (нет env), это штатный режим:
+ * заявка тогда уходит только в Telegram, как было до Posiflora.
+ */
+export type PosifloraOutcome =
+  | { status: "created"; order: PosifloraOrder }
+  | { status: "disabled" }
+  | { status: "failed"; error: string };
+
+/** Дата заказа в часовом поясе магазина; сервер ждёт YYYY-MM-DD. */
+function storeDate(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+/** «2022-07-19T09:01:55Z» — формат из документации, без миллисекунд. */
+function isoSeconds(now: Date): string {
+  return now.toISOString().replace(/\.\d+Z$/, "Z");
+}
+
+/**
+ * Заказ создаётся без привязки к клиенту, поэтому все контакты живут
+ * в `description` — это единственное поле карточки, где менеджер их увидит.
+ */
+function buildDescription(data: OrderInput): string {
+  const lines = [`Заявка с сайта ${site.domain}`, `ФИО: ${data.fullName}`, `Телефон: ${data.phone}`];
+
+  const nick = data.telegramNick?.trim();
+  if (nick) lines.push(`Telegram: ${nick}`);
+
+  const methods = contactMethodLabels(data.contactMethods);
+  if (methods) lines.push(`Способ связи: ${methods}`);
+
+  const category = data.category?.trim();
+  if (category) lines.push(`Что нужно: ${category}`);
+
+  const comment = data.comment?.trim();
+  if (comment) lines.push(`Комментарий: ${comment}`);
+
+  // Тот же след согласия, что и в сообщении Telegram (ч. 3 ст. 9 152-ФЗ).
+  lines.push(
+    `Согласие на обработку ПДн подтверждено на сайте (редакция документов от ${site.privacyRevision})`,
+  );
+
+  return lines.join("\n");
+}
+
+/** Связь JSON:API: ссылка на ресурс либо явный null, как в документации. */
+function ref(type: string, id: string | undefined) {
+  return { data: id ? { type, id } : null };
+}
+
+type OrderIds = {
+  storeId: string;
+  sourceId?: string;
+  workerId?: string;
+};
+
+function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
+  const timestamp = isoSeconds(now);
+  return {
+    data: {
+      type: "orders",
+      // id генерируем сами: Posiflora принимает клиентский UUID и возвращает его же.
+      id: randomUUID(),
+      attributes: {
+        budget: 0,
+        byBonuses: false,
+        createdAt: timestamp,
+        date: storeDate(now),
+        // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
+        delivery: false,
+        description: buildDescription(data),
+        fiscal: false,
+        status: "new",
+        updatedAt: timestamp,
+      },
+      relationships: {
+        courier: { data: null },
+        createdBy: ref("workers", ids.workerId),
+        customer: { data: null },
+        discounts: { data: [] },
+        florist: { data: null },
+        images: { data: [] },
+        // Состав заказа собирает флорист — с сайта приходит только пожелание.
+        lines: { data: [] },
+        source: ref("order-sources", ids.sourceId),
+        store: ref("stores", ids.storeId),
+        updatedBy: { data: null },
+      },
+    },
+  };
+}
+
+type OrderResponse = {
+  data?: { id?: unknown; attributes?: Record<string, unknown> };
+};
+
+async function postOrder(
+  cfg: PosifloraConfig,
+  payload: ReturnType<typeof buildOrderPayload>,
+): Promise<PosifloraOrder> {
+  const send = async () =>
+    fetch(`${cfg.baseUrl}/v1/orders`, {
+      method: "POST",
+      headers: {
+        "Content-Type": JSON_API,
+        Accept: JSON_API,
+        Authorization: `Bearer ${await getAccessToken(cfg)}`,
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+  let res: Response;
+  try {
+    res = await send();
+    // Сессию могли отозвать на стороне Posiflora — один ретрай с новым логином.
+    if (res.status === 401) {
+      invalidateSession();
+      res = await send();
+    }
+  } catch (err) {
+    throw new Error(redact(describeError(err), cfg));
+  }
+
+  const body = await res.text();
+  if (!res.ok) throw new Error(redact(describeApiError(res.status, body), cfg));
+
+  let parsed: OrderResponse;
+  try {
+    parsed = JSON.parse(body) as OrderResponse;
+  } catch {
+    // Заказ, скорее всего, создан (201), но тело не разобралось — отдаём свой
+    // UUID, чтобы менеджер мог найти заказ, и не роняем заявку.
+    return { id: payload.data.id, docNo: null, status: null };
+  }
+
+  const attributes = parsed.data?.attributes ?? {};
+  return {
+    id: typeof parsed.data?.id === "string" ? parsed.data.id : payload.data.id,
+    docNo: typeof attributes.docNo === "string" ? attributes.docNo : null,
+    status: typeof attributes.status === "string" ? attributes.status : null,
+  };
+}
+
+/**
+ * Создаёт заказ в Posiflora. Никогда не бросает: вызывающий код решает по
+ * `status`, показывать клиенту ошибку или нет.
+ */
+export async function createPosifloraOrder(
+  data: OrderInput,
+): Promise<PosifloraOutcome> {
+  const cfg = readPosifloraConfig();
+  if (!cfg) return { status: "disabled" };
+
+  const storeId = process.env.POSIFLORA_STORE_ID;
+  if (!storeId) {
+    return {
+      status: "failed",
+      error:
+        "POSIFLORA_STORE_ID не задан: заказ невозможно привязать к точке продаж.",
+    };
+  }
+
+  const ids: OrderIds = {
+    storeId,
+    sourceId: process.env.POSIFLORA_SOURCE_ID,
+    workerId: process.env.POSIFLORA_WORKER_ID,
+  };
+
+  try {
+    const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
+    return { status: "created", order };
+  } catch (err) {
+    return { status: "failed", error: describeError(err) };
+  }
+}

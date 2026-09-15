@@ -19,9 +19,10 @@
   подставляется автоматически; «витринное» округление цен вверх до `…90`.
 - **Каталог-коллаж** (бенто-сетка), секция сезонности, FAQ-аккордеон,
   бесконечная карусель отзывов с ручным drag/свайпом и инерцией.
-- **Форма заявки → Telegram**: zod-валидация на клиенте и сервере,
-  honeypot, rate-limit (5 заявок / 10 минут / IP), рассылка нескольким
-  получателям, аккуратные состояния ошибок.
+- **Форма заявки → Posiflora + Telegram**: заказ создаётся в Posiflora
+  (JSON:API, `POST /v1/orders`), в Telegram уходит уведомление с номером
+  документа. zod-валидация на клиенте и сервере, honeypot, rate-limit
+  (5 заявок / 10 минут / IP), аккуратные состояния ошибок.
 - **SEO**: метаданные, OG-картинка, JSON-LD (Florist + FAQPage), robots,
   sitemap, фирменный favicon через `ImageResponse`.
 - **Безопасность**: CSP и набор security-заголовков, лимит размера тела
@@ -47,10 +48,16 @@ npm run dev                  # http://localhost:3000
 
 Переменные окружения (см. `.env.example`):
 
-- `TELEGRAM_BOT_TOKEN` — токен бота, которому уходят заявки;
+- `POSIFLORA_API_URL`, `POSIFLORA_USERNAME`, `POSIFLORA_PASSWORD` — доступ
+  к API; `POSIFLORA_STORE_ID` — UUID точки продаж (обязателен, если
+  интеграция включена); `POSIFLORA_SOURCE_ID` и `POSIFLORA_WORKER_ID` —
+  источник заказа и сотрудник-создатель, необязательные;
+- `TELEGRAM_BOT_TOKEN` — токен бота, которому уходят уведомления;
 - `TELEGRAM_CHAT_ID` — chat_id получателя; несколько — через запятую.
 
-Без них сайт работает, но отправка формы вернёт ошибку.
+Если переменные Posiflora не заданы, интеграция считается выключённой и
+заявка уходит только в Telegram. Без Telegram-переменных сайт тоже
+работает, но при выключенной Posiflora отправка формы вернёт ошибку.
 
 Продакшен-сборка: `npm run build && npm start`. Линт: `npm run lint`.
 
@@ -59,6 +66,10 @@ npm run dev                  # http://localhost:3000
 ```bash
 docker build -t flowerssobo .
 docker run -p 3000:3000 \
+  -e POSIFLORA_API_URL=... \
+  -e POSIFLORA_USERNAME=... \
+  -e POSIFLORA_PASSWORD=... \
+  -e POSIFLORA_STORE_ID=... \
   -e TELEGRAM_BOT_TOKEN=... \
   -e TELEGRAM_CHAT_ID=... \
   flowerssobo
@@ -76,7 +87,7 @@ app/
   page.tsx           # единственная страница-лендинг (композиция секций)
   layout.tsx         # шрифты, метаданные, JSON-LD, тосты
   privacy/           # политика обработки персональных данных (152-ФЗ)
-  api/order/         # приём заявки: rate-limit → zod → Telegram
+  api/order/         # приём заявки: rate-limit → zod → Posiflora → Telegram
   icon.tsx, robots.ts, sitemap.ts, not-found.tsx, error.tsx
 components/
   Hero, Season, Categories, Showcase, ProductCard, ProductDetail,
@@ -84,12 +95,28 @@ components/
 lib/
   site.ts            # единая точка правды: контакты, ссылки, реквизиты
   products.ts        # витрина: цена за штуку, варианты количества, упаковка
+  posiflora.ts       # сессия Posiflora (логин/refresh) + создание заказа
   catalog.ts, faq.ts, reviews.ts, schema.ts, telegram.ts, utils.ts
 public/
   images/, video/, og.jpg
 ```
 
 ## Заметки по реализации
+
+- **Маршрут заявки.** `POST /api/order` сначала создаёт заказ в Posiflora и
+  только потом шлёт уведомление в Telegram. Если Posiflora вернула ошибку,
+  клиент видит ошибку — заявки нет. Если заказ создан, а Telegram отвалился,
+  клиент видит успех (заказ-то на месте), а сбой уходит в лог. Когда Posiflora
+  не настроена, Telegram снова становится единственным адресатом, и его сбой
+  опять означает ошибку для клиента.
+- **Сессия Posiflora.** Access-токен кэшируется в памяти инстанса до `expireAt`
+  (со сдвигом 30 c); параллельные заявки схлопываются в один логин. Протухший
+  refresh-токен не роняет заявку — клиент логинится заново. На 401 делается
+  один повтор с новой сессией. Пароль и токены вычищаются из логов.
+- **Состав заказа.** С сайта приходит пожелание, а не корзина, поэтому заказ
+  создаётся с пустыми `lines` и `budget: 0`, без привязки клиента: контакты
+  (ФИО, телефон, ник, способ связи, категория, комментарий) складываются в
+  `description`, который менеджер видит в карточке заказа.
 
 - Цены поштучных позиций: `итог = prettyPrice(кол-во × цена/шт + упаковка)`,
   где `prettyPrice` округляет вверх до ближайшего `…90`.
