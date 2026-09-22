@@ -49,6 +49,8 @@ type CachedSession = {
   expireAt: number;
   refreshToken: string;
   refreshExpireAt: number;
+  /** Сотрудник из ответа логина — становится `createdBy` у заказа. */
+  workerId: string | null;
 };
 
 /**
@@ -132,12 +134,18 @@ function parseExpiry(value: unknown, fallbackMs: number): number {
 }
 
 type SessionResponse = {
-  data?: { attributes?: Record<string, unknown> };
+  data?: {
+    attributes?: Record<string, unknown>;
+    relationships?: { worker?: { data?: { id?: unknown } | null } };
+  };
 };
 
 function toSession(payload: unknown): CachedSession {
-  const attributes = (payload as SessionResponse)?.data?.attributes ?? {};
+  const data = (payload as SessionResponse)?.data;
+  const attributes = data?.attributes ?? {};
+  const workerId = data?.relationships?.worker?.data?.id;
   return {
+    workerId: typeof workerId === "string" ? workerId : null,
     accessToken: requireString(attributes.accessToken, "accessToken"),
     refreshToken: requireString(attributes.refreshToken, "refreshToken"),
     // Значения по умолчанию — из документации: access ~1 час, refresh ~30 дней.
@@ -204,16 +212,19 @@ async function negotiate(
   return session;
 }
 
-/** Действующий access-токен: из кэша, продлением или новым логином. */
-export async function getAccessToken(cfg: PosifloraConfig): Promise<string> {
+/** Действующая сессия: из кэша, продлением или новым логином. */
+async function ensureSession(cfg: PosifloraConfig): Promise<CachedSession> {
   const now = Date.now();
-  if (session && session.expireAt - EXPIRY_SKEW_MS > now) {
-    return session.accessToken;
-  }
+  if (session && session.expireAt - EXPIRY_SKEW_MS > now) return session;
   pending ??= negotiate(cfg, now).finally(() => {
     pending = null;
   });
-  return (await pending).accessToken;
+  return pending;
+}
+
+/** Действующий access-токен. */
+export async function getAccessToken(cfg: PosifloraConfig): Promise<string> {
+  return (await ensureSession(cfg)).accessToken;
 }
 
 /** Сбрасывает кэш — нужен, когда API ответил 401 на, казалось бы, живой токен. */
@@ -311,18 +322,15 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         status: "new",
         updatedAt: timestamp,
       },
+      // Только те связи, что объявлены в схеме POST /v1/orders. Состав заказа
+      // (lines) не шлём вовсе: с сайта приходит пожелание, а не корзина —
+      // позиции добавит флорист.
       relationships: {
-        courier: { data: null },
         createdBy: ref("workers", ids.workerId),
         customer: { data: null },
-        discounts: { data: [] },
         florist: { data: null },
-        images: { data: [] },
-        // Состав заказа собирает флорист — с сайта приходит только пожелание.
-        lines: { data: [] },
         source: ref("order-sources", ids.sourceId),
         store: ref("stores", ids.storeId),
-        updatedBy: { data: null },
       },
     },
   };
@@ -342,7 +350,7 @@ async function postOrder(
       headers: {
         "Content-Type": JSON_API,
         Accept: JSON_API,
-        Authorization: `Bearer ${await getAccessToken(cfg)}`,
+        Authorization: `Bearer ${(await ensureSession(cfg)).accessToken}`,
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -399,13 +407,15 @@ export async function createPosifloraOrder(
     };
   }
 
-  const ids: OrderIds = {
-    storeId,
-    sourceId: process.env.POSIFLORA_SOURCE_ID,
-    workerId: process.env.POSIFLORA_WORKER_ID,
-  };
-
   try {
+    // Сотрудник по умолчанию — тот, под чьей учёткой залогинились: его id
+    // приходит в ответе на логин, так что отдельная переменная не нужна.
+    const { workerId } = await ensureSession(cfg);
+    const ids: OrderIds = {
+      storeId,
+      sourceId: process.env.POSIFLORA_SOURCE_ID,
+      workerId: process.env.POSIFLORA_WORKER_ID ?? workerId ?? undefined,
+    };
     const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
     return { status: "created", order };
   } catch (err) {

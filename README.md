@@ -48,10 +48,13 @@ npm run dev                  # http://localhost:3000
 
 Переменные окружения (см. `.env.example`):
 
-- `POSIFLORA_API_URL`, `POSIFLORA_USERNAME`, `POSIFLORA_PASSWORD` — доступ
-  к API; `POSIFLORA_STORE_ID` — UUID точки продаж (обязателен, если
-  интеграция включена); `POSIFLORA_SOURCE_ID` и `POSIFLORA_WORKER_ID` —
-  источник заказа и сотрудник-создатель, необязательные;
+- `POSIFLORA_API_URL` — база API **вместе с `/api`**, например
+  `https://ваш-аккаунт.posiflora.com/api`; `POSIFLORA_USERNAME` и
+  `POSIFLORA_PASSWORD` — учётка; `POSIFLORA_STORE_ID` — UUID точки продаж
+  (обязателен, если интеграция включена); `POSIFLORA_SOURCE_ID` и
+  `POSIFLORA_WORKER_ID` — источник заказа и сотрудник-создатель,
+  необязательные (сотрудник по умолчанию берётся из сессии).
+  Где взять UUID — ниже, «Как найти идентификаторы Posiflora»;
 - `TELEGRAM_BOT_TOKEN` — токен бота, которому уходят уведомления;
 - `TELEGRAM_CHAT_ID` — chat_id получателя; несколько — через запятую.
 
@@ -60,6 +63,56 @@ npm run dev                  # http://localhost:3000
 работает, но при выключенной Posiflora отправка формы вернёт ошибку.
 
 Продакшен-сборка: `npm run build && npm start`. Линт: `npm run lint`.
+
+## Как найти идентификаторы Posiflora
+
+В личном кабинете UUID точки продаж и источника заказа не показываются —
+их отдаёт API. Если знаете только логин и пароль, достаточно одной команды:
+
+```bash
+node scripts/posiflora-ids.mjs https://ваш-аккаунт.posiflora.com/api ЛОГИН ПАРОЛЬ
+```
+
+Скрипт залогинится, выведет точки продаж, источники заказа и сотрудников,
+а в конце — готовый блок для `.env.local`. Он ничего не меняет, только
+читает; пароль и токен не печатает. Без аргументов значения берутся из
+окружения или из `.env.local`.
+
+То же самое вручную, через `curl`. **1. Логин** — в ответе нужны
+`data.attributes.accessToken` и `data.relationships.worker.data.id`
+(это и есть сотрудник для `createdBy`):
+
+```bash
+curl -sS -X POST "https://ваш-аккаунт.posiflora.com/api/v1/sessions" \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Accept: application/vnd.api+json" \
+  -d '{"data":{"type":"sessions","attributes":{"username":"ЛОГИН","password":"ПАРОЛЬ"}}}'
+```
+
+**2. Справочники** — подставьте токен из первого шага. Точки продаж дадут
+`POSIFLORA_STORE_ID`, источники — `POSIFLORA_SOURCE_ID`:
+
+```bash
+TOKEN="вставьте_accessToken"
+BASE="https://ваш-аккаунт.posiflora.com/api"
+
+curl -sS "$BASE/v1/stores"        -H "Accept: application/vnd.api+json" -H "Authorization: Bearer $TOKEN"
+curl -sS "$BASE/v1/order-sources" -H "Accept: application/vnd.api+json" -H "Authorization: Bearer $TOKEN"
+curl -sS "$BASE/v1/workers?activeOnly=true" -H "Accept: application/vnd.api+json" -H "Authorization: Bearer $TOKEN"
+```
+
+**3. Источник «Сайт»**, если его ещё нет. UUID придумываете сами — API
+принимает клиентский идентификатор и возвращает его же:
+
+```bash
+curl -sS -X POST "$BASE/v1/order-sources" \
+  -H "Content-Type: application/vnd.api+json" \
+  -H "Accept: application/vnd.api+json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"data":[{"type":"order-sources","id":"ПРИДУМАННЫЙ-UUID","attributes":{"title":"Сайт"}}]}'
+```
+
+Access-токен живёт около часа — для разовой настройки этого хватает.
 
 ### Docker
 
@@ -97,6 +150,8 @@ lib/
   products.ts        # витрина: цена за штуку, варианты количества, упаковка
   posiflora.ts       # сессия Posiflora (логин/refresh) + создание заказа
   catalog.ts, faq.ts, reviews.ts, schema.ts, telegram.ts, utils.ts
+scripts/
+  posiflora-ids.mjs  # поиск UUID точки продаж, источника и сотрудника
 public/
   images/, video/, og.jpg
 ```
@@ -114,9 +169,14 @@ public/
   refresh-токен не роняет заявку — клиент логинится заново. На 401 делается
   один повтор с новой сессией. Пароль и токены вычищаются из логов.
 - **Состав заказа.** С сайта приходит пожелание, а не корзина, поэтому заказ
-  создаётся с пустыми `lines` и `budget: 0`, без привязки клиента: контакты
+  создаётся без позиций и с `budget: 0`, без привязки клиента: контакты
   (ФИО, телефон, ник, способ связи, категория, комментарий) складываются в
   `description`, который менеджер видит в карточке заказа.
+- **Связи заказа.** Отправляем только то, что объявлено в схеме
+  `POST /v1/orders`: `store`, `source`, `customer`, `createdBy`, `florist`.
+  `lines`, `images`, `courier` и `updatedBy` есть лишь в примере из
+  документации и несут пустые значения — не шлём, чтобы не ловить 422.
+  `docNo` не задаём: номер документа присваивает Posiflora.
 
 - Цены поштучных позиций: `итог = prettyPrice(кол-во × цена/шт + упаковка)`,
   где `prettyPrice` округляет вверх до ближайшего `…90`.
