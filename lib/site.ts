@@ -2,6 +2,8 @@
 export const site = {
   name: "Flowerssobo",
   domain: "flowerssobo.ru",
+  /** Канонический адрес — для metadata, robots, sitemap и JSON-LD. */
+  url: "https://flowerssobo.ru",
   city: "Липецк",
   deliveryTime: "60–90 минут",
   phoneDisplay: "+7 980 264-74-99",
@@ -23,17 +25,18 @@ export const site = {
   metaDisclaimer:
     "Instagram запрещён в РФ, принадлежит корпорации Meta, признанной экстремистской организацией",
   /**
-   * Дата действующей редакции Политики конфиденциальности и Согласия.
+   * Дата действующей редакции Положения о конфиденциальности и Согласия.
    * Меняется ТОЛЬКО при правке текстов /privacy и /consent — эта же дата
-   * фиксируется в каждой заявке в Telegram как версия, на которую дано
-   * согласие (доказательство по ч. 3 ст. 9 152-ФЗ).
+   * фиксируется в заявке как версия документов, на которую дано согласие
+   * (доказательство по ч. 3 ст. 9 152-ФЗ).
    */
-  privacyRevision: "19.07.2026",
+  privacyRevision: "26.09.2026",
 } as const;
 
 export const navLinks = [
   { href: "#catalog", label: "Каталог" },
   { href: "#bouquets", label: "Витрина" },
-  { href: "#order", label: "Доставка" },
+  // Условия доставки (часы, стоимость, бесплатная от 10 000 ₽) — в «Вопросах».
+  { href: "#faq", label: "Доставка" },
   { href: "#contacts", label: "Контакты" },
 ] as const;
