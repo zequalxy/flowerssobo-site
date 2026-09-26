@@ -1,4 +1,5 @@
-import type { OrderInput } from "./schema";
+import type { PosifloraOrder } from "./posiflora";
+import { contactMethodLabels, type OrderInput } from "./schema";
 import { site } from "./site";
 
 /** Escape characters that are special in Telegram HTML parse mode. */
@@ -15,14 +16,14 @@ function row(label: string, value?: string): string {
   return `<b>${label}:</b> ${esc(v)}\n`;
 }
 
-const METHOD_LABELS: Record<string, string> = {
-  telegram: "Телеграм",
-  whatsapp: "WhatsApp",
-  phone: "Телефон",
-};
-
-/** Build the notification message sent to the shop's Telegram. */
-export function formatOrderMessage(data: OrderInput): string {
+/**
+ * Уведомление о новом заказе. Основная заявка уходит в Posiflora — здесь
+ * менеджер видит её содержимое и номер документа, чтобы сразу найти заказ.
+ */
+export function formatOrderMessage(
+  data: OrderInput,
+  order?: PosifloraOrder,
+): string {
   const stamp = new Intl.DateTimeFormat("ru-RU", {
     timeZone: "Europe/Moscow",
     day: "2-digit",
@@ -32,12 +33,14 @@ export function formatOrderMessage(data: OrderInput): string {
     minute: "2-digit",
   }).format(new Date());
 
-  const methods = (data.contactMethods ?? [])
-    .map((m) => METHOD_LABELS[m] ?? m)
-    .join(", ");
+  const methods = contactMethodLabels(data.contactMethods);
 
   const lines = [
-    "<b>НОВАЯ ЗАЯВКА С САЙТА</b>\n",
+    order
+      ? "<b>НОВЫЙ ЗАКАЗ В POSIFLORA</b>\n"
+      : "<b>НОВАЯ ЗАЯВКА С САЙТА</b>\n",
+    // Номер документа — то, по чему заказ ищется в интерфейсе Posiflora.
+    order ? row("Заказ", order.docNo ?? order.id) : "",
     row("ФИО", data.fullName),
     row("Телефон", data.phone),
     row("Telegram", data.telegramNick),
@@ -67,7 +70,10 @@ function describeError(err: unknown): string {
 }
 
 /** Send the order to Telegram via the Bot API. Token stays server-side. */
-export async function sendOrderToTelegram(data: OrderInput): Promise<SendResult> {
+export async function sendOrderToTelegram(
+  data: OrderInput,
+  order?: PosifloraOrder,
+): Promise<SendResult> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatIdsRaw = process.env.TELEGRAM_CHAT_ID;
   // Если хостинг не выпускает трафик к api.telegram.org напрямую, сюда можно
@@ -90,7 +96,7 @@ export async function sendOrderToTelegram(data: OrderInput): Promise<SendResult>
   }
 
   const chatIds = chatIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const text = formatOrderMessage(data);
+  const text = formatOrderMessage(data, order);
 
   // Ошибки URL/сети могут содержать полный адрес запроса вместе с токеном —
   // вычищаем его из всего, что уходит в логи.

@@ -40,4 +40,13 @@ export const orderSchema = z.object({
   extraField: z.string().optional(),
 });
 
+const METHOD_LABELS: Record<string, string> = Object.fromEntries(
+  contactMethods.map((m) => [m.id, m.label]),
+);
+
+/** Человекочитаемый список способов связи — и для Telegram, и для Posiflora. */
+export function contactMethodLabels(ids: readonly string[] = []): string {
+  return ids.map((id) => METHOD_LABELS[id] ?? id).join(", ");
+}
+
 export type OrderInput = z.infer<typeof orderSchema>;

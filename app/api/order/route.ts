@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createPosifloraOrder } from "@/lib/posiflora";
 import { orderSchema } from "@/lib/schema";
 import { sendOrderToTelegram } from "@/lib/telegram";
 
@@ -75,10 +76,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const result = await sendOrderToTelegram(parsed.data);
-  if (!result.ok) {
-    console.error("Telegram send failed:", result.error);
-    return NextResponse.json(
+  // Фабрика, а не готовый Response: тело можно прочитать только один раз.
+  const failure = () =>
+    NextResponse.json(
       {
         ok: false,
         error:
@@ -86,6 +86,24 @@ export async function POST(req: Request) {
       },
       { status: 502 },
     );
+
+  // Posiflora — основной адресат: пока заказ не заведён, заявки нет.
+  const posiflora = await createPosifloraOrder(parsed.data);
+  if (posiflora.status === "failed") {
+    console.error("Posiflora order failed:", posiflora.error);
+    return failure();
+  }
+
+  const order = posiflora.status === "created" ? posiflora.order : undefined;
+
+  // Telegram — уведомление о заказе. Заказ уже в Posiflora, поэтому сбой
+  // рассылки не должен выглядеть для клиента как потерянная заявка: логируем
+  // и отвечаем успехом. Исключение — когда Posiflora не настроена: тогда
+  // Telegram остаётся единственным адресатом и его сбой означает потерю заявки.
+  const notified = await sendOrderToTelegram(parsed.data, order);
+  if (!notified.ok) {
+    console.error("Telegram notification failed:", notified.error);
+    if (posiflora.status === "disabled") return failure();
   }
 
   return NextResponse.json({ ok: true });
