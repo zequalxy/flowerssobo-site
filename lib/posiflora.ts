@@ -93,12 +93,17 @@ type JsonApiErrors = {
   errors?: Array<{ title?: unknown; detail?: unknown; code?: unknown }>;
 };
 
+/** Тело похоже на HTML-страницу (nginx, балансировщик), а не на JSON:API. */
+function looksLikeHtml(body: string): boolean {
+  return /^\s*<(?:!doctype|html|head|body)/i.test(body.trim());
+}
+
 /**
  * Posiflora возвращает ошибки массивом `errors` по JSON:API. Собираем из них
- * читаемую строку; если тело не разобралось — отдаём сырой текст, урезанный,
- * чтобы HTML-страница от балансировщика не утащила в лог килобайты.
+ * читаемую строку. `where` — метод и путь: без него по логу не понять, что
+ * упало, логин или создание заказа.
  */
-function describeApiError(status: number, body: string): string {
+function describeApiError(status: number, body: string, where: string): string {
   try {
     const parsed = JSON.parse(body) as JsonApiErrors;
     const details = (parsed.errors ?? [])
@@ -106,11 +111,27 @@ function describeApiError(status: number, body: string): string {
         [e.title, e.detail].filter((v) => typeof v === "string").join(": "),
       )
       .filter(Boolean);
-    if (details.length > 0) return `Posiflora ${status}: ${details.join("; ")}`;
+    if (details.length > 0) {
+      return `Posiflora ${status} на ${where}: ${details.join("; ")}`;
+    }
   } catch {
-    // Не JSON — ниже уйдёт сырой ответ.
+    // Не JSON — разбираем ниже.
   }
-  return `Posiflora ${status}: ${body.slice(0, 300)}`;
+
+  // HTML вместо JSON:API означает, что запрос вообще не дошёл до API: его
+  // принял веб-сервер. При 404/405 это почти всегда обрезанный
+  // POSIFLORA_API_URL — база должна включать /api. Саму страницу в лог не
+  // тащим: от неё только килобайты разметки.
+  if (looksLikeHtml(body)) {
+    const hint =
+      status === 404 || status === 405
+        ? " Проверьте POSIFLORA_API_URL: база должна заканчиваться на /api," +
+          " например https://ваш-аккаунт.posiflora.com/api"
+        : "";
+    return `Posiflora ${status} на ${where}: вместо JSON:API пришла HTML-страница.${hint}`;
+  }
+
+  return `Posiflora ${status} на ${where}: ${body.slice(0, 300)}`;
 }
 
 function requireString(value: unknown, field: string): string {
@@ -163,6 +184,7 @@ async function requestSession(
   method: "POST" | "PATCH",
   attributes: Record<string, string>,
 ): Promise<CachedSession> {
+  const where = `${method} /v1/sessions`;
   let res: Response;
   try {
     res = await fetch(`${cfg.baseUrl}/v1/sessions`, {
@@ -172,16 +194,18 @@ async function requestSession(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`${where}: ${describeError(err)}`, cfg));
   }
 
   const body = await res.text();
-  if (!res.ok) throw new Error(redact(describeApiError(res.status, body), cfg));
+  if (!res.ok) {
+    throw new Error(redact(describeApiError(res.status, body, where), cfg));
+  }
 
   try {
     return toSession(JSON.parse(body));
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`${where}: ${describeError(err)}`, cfg));
   }
 }
 
@@ -365,11 +389,15 @@ async function postOrder(
       res = await send();
     }
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`POST /v1/orders: ${describeError(err)}`, cfg));
   }
 
   const body = await res.text();
-  if (!res.ok) throw new Error(redact(describeApiError(res.status, body), cfg));
+  if (!res.ok) {
+    throw new Error(
+      redact(describeApiError(res.status, body, "POST /v1/orders"), cfg),
+    );
+  }
 
   let parsed: OrderResponse;
   try {
