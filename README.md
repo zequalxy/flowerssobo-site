@@ -67,20 +67,11 @@ npm run dev                  # http://localhost:3000
 ## Как найти идентификаторы Posiflora
 
 В личном кабинете UUID точки продаж и источника заказа не показываются —
-их отдаёт API. Если знаете только логин и пароль, достаточно одной команды:
+их отдаёт API. Достаточно логина и пароля.
 
-```bash
-node scripts/posiflora-ids.mjs https://ваш-аккаунт.posiflora.com/api ЛОГИН ПАРОЛЬ
-```
-
-Скрипт залогинится, выведет точки продаж, источники заказа и сотрудников,
-а в конце — готовый блок для `.env.local`. Он ничего не меняет, только
-читает; пароль и токен не печатает. Без аргументов значения берутся из
-окружения или из `.env.local`.
-
-То же самое вручную, через `curl`. **1. Логин** — в ответе нужны
-`data.attributes.accessToken` и `data.relationships.worker.data.id`
-(это и есть сотрудник для `createdBy`):
+**1. Логин.** В ответе нужен `data.attributes.accessToken`; заодно там
+лежит `data.relationships.worker.data.id` — сотрудник, который
+подставится в `createdBy`, отдельная переменная для него не нужна:
 
 ```bash
 curl -sS -X POST "https://ваш-аккаунт.posiflora.com/api/v1/sessions" \
@@ -113,6 +104,8 @@ curl -sS -X POST "$BASE/v1/order-sources" \
 ```
 
 Access-токен живёт около часа — для разовой настройки этого хватает.
+Учтите, что пароль из команды логина останется в истории оболочки:
+после настройки историю стоит почистить.
 
 ### Docker
 
@@ -150,8 +143,6 @@ lib/
   products.ts        # витрина: цена за штуку, варианты количества, упаковка
   posiflora.ts       # сессия Posiflora (логин/refresh) + создание заказа
   catalog.ts, faq.ts, reviews.ts, schema.ts, telegram.ts, utils.ts
-scripts/
-  posiflora-ids.mjs  # поиск UUID точки продаж, источника и сотрудника
 public/
   images/, video/, og.jpg
 ```
