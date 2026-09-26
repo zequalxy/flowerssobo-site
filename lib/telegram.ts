@@ -15,7 +15,7 @@ type ChatResult = { ok: true } | { ok: false; error: string; chatId: string };
  * (TELEGRAM_NOTIFY_ONLY=1). По умолчанию в Telegram уходит заявка целиком:
  * иначе сборка без Posiflora молча теряла бы все заказы.
  */
-function notifyOnly(): boolean {
+export function isTelegramNotifyOnly(): boolean {
   return process.env.TELEGRAM_NOTIFY_ONLY === "1";
 }
 
@@ -131,7 +131,7 @@ export async function sendOrderToTelegram(
   }
 
   const chatIds = chatIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const text = notifyOnly()
+  const text = isTelegramNotifyOnly()
     ? formatOrderNotification(order)
     : formatOrderMessage(data, order);
 

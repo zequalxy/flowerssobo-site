@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createPosifloraOrder } from "@/lib/posiflora";
+import { createPosifloraOrder, readPosifloraConfig } from "@/lib/posiflora";
 import { orderSchema } from "@/lib/schema";
-import { sendOrderToTelegram } from "@/lib/telegram";
+import { isTelegramNotifyOnly, sendOrderToTelegram } from "@/lib/telegram";
 
 export const runtime = "nodejs";
 
@@ -115,6 +115,24 @@ export async function POST(req: Request) {
       },
       { status: 502 },
     );
+
+  // Комбинация, в которой заявку некуда положить: Telegram получает сигнал
+  // без персональных данных, потому что детали «лежат в Posiflora», а
+  // Posiflora не настроена. Раньше это молча теряло заявку: клиент видел
+  // успех, владелец — содержательно пустое уведомление, заказа не было
+  // нигде. Отказываемся до отправки: слать бессмысленный сигнал незачем, а
+  // подменять его полной заявкой нельзя — владелец сознательно отключил
+  // передачу персональных данных в Telegram, и согласие на сайте может
+  // такой передачи не предусматривать.
+  if (isTelegramNotifyOnly() && !readPosifloraConfig()) {
+    console.error(
+      "TELEGRAM_NOTIFY_ONLY=1, но Posiflora не настроена: заявку некуда " +
+        "сохранить. Задайте POSIFLORA_API_URL, POSIFLORA_USERNAME, " +
+        "POSIFLORA_PASSWORD и POSIFLORA_STORE_ID — либо снимите " +
+        "TELEGRAM_NOTIFY_ONLY, чтобы заявка уходила в Telegram целиком.",
+    );
+    return failure();
+  }
 
   // Posiflora — основной адресат: пока заказ не заведён, заявки нет.
   const posiflora = await createPosifloraOrder(parsed.data);
