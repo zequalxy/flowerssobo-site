@@ -348,7 +348,31 @@ type OrderIds = {
   storeId: string;
   sourceId?: string;
   workerId?: string;
+  /** Префикс номера документа; пусто — docNo не отправляем вовсе. */
+  docPrefix?: string;
 };
+
+/**
+ * Номер документа вида `site2609260483`: префикс, дата и случайный хвост.
+ *
+ * По умолчанию docNo не отправляется — обычно номер присваивает Posiflora, и
+ * свой формат сломал бы нумерацию магазина. Но если сервер требует поле
+ * непустым (422 с pointer `/data/attributes/docNo`), достаточно задать
+ * POSIFLORA_DOC_PREFIX — правки кода не нужны. Отдельный префикс заодно
+ * отделяет заказы с сайта от заведённых на кассе.
+ */
+function buildDocNo(prefix: string, now: Date): string {
+  const stamp = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(now)
+    .replace(/\D/g, "");
+  const tail = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
+  return `${prefix}${stamp}${tail}`;
+}
 
 function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
   const timestamp = isoSeconds(now);
@@ -366,6 +390,9 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         fiscal: false,
         status: "new",
         updatedAt: timestamp,
+        ...(ids.docPrefix
+          ? { docNo: buildDocNo(ids.docPrefix, now) }
+          : {}),
         // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
         // Пустые строки и null-таймеры отправляем явно, как в примере из
         // документации: сервер валидирует поля на «не пусто», а отсутствующее
@@ -485,6 +512,7 @@ export async function createPosifloraOrder(
       storeId,
       sourceId: process.env.POSIFLORA_SOURCE_ID,
       workerId: process.env.POSIFLORA_WORKER_ID ?? workerId ?? undefined,
+      docPrefix: process.env.POSIFLORA_DOC_PREFIX?.trim() || undefined,
     };
     const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
     return { status: "created", order };
