@@ -1,6 +1,31 @@
 import type { OrderInput } from "./schema";
 import { site } from "./site";
 
+type SendResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Режим «только уведомление»: заявка целиком уходит в Posiflora, а в Telegram —
+ * лишь сигнал «пришла новая», без персональных данных клиента.
+ *
+ * ВКЛЮЧАЕТСЯ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ ИНТЕГРАЦИЯ С POSIFLORA (TELEGRAM_NOTIFY_ONLY=1).
+ * В этом репозитории её нет, поэтому по умолчанию в Telegram уходит заявка
+ * целиком: иначе сборка без Posiflora молча теряла бы все заказы.
+ */
+function notifyOnly(): boolean {
+  return process.env.TELEGRAM_NOTIFY_ONLY === "1";
+}
+
+function moscowStamp(): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
 /** Escape characters that are special in Telegram HTML parse mode. */
 function esc(value: string): string {
   return value
@@ -21,17 +46,18 @@ const METHOD_LABELS: Record<string, string> = {
   phone: "Телефон",
 };
 
-/** Build the notification message sent to the shop's Telegram. */
-export function formatOrderMessage(data: OrderInput): string {
-  const stamp = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: "Europe/Moscow",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date());
+/** Сигнал без персональных данных — для режима с Posiflora. */
+export function formatOrderNotification(): string {
+  return [
+    "<b>🌸 Новая заявка с сайта</b>",
+    "",
+    "Детали — в Posiflora.",
+    `<i>${moscowStamp()} (МСК)</i>`,
+  ].join("\n");
+}
 
+/** Заявка целиком — режим по умолчанию, когда Posiflora не подключена. */
+export function formatOrderMessage(data: OrderInput): string {
   const methods = (data.contactMethods ?? [])
     .map((m) => METHOD_LABELS[m] ?? m)
     .join(", ");
@@ -47,13 +73,11 @@ export function formatOrderMessage(data: OrderInput): string {
     // Фиксация факта согласия и версии документов (ч. 3 ст. 9 152-ФЗ):
     // вместе со штампом времени это доказательство, что согласие дано.
     `\n<i>Согласие на обработку ПДн подтверждено на сайте (редакция документов от ${esc(site.privacyRevision)})</i>`,
-    `\n<i>${esc(stamp)} (МСК)</i>`,
+    `\n<i>${esc(moscowStamp())} (МСК)</i>`,
   ];
 
   return lines.filter(Boolean).join("");
 }
-
-type SendResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Раскрывает undici-шную «fetch failed» до реальной причины (ENOTFOUND,
@@ -66,7 +90,10 @@ function describeError(err: unknown): string {
   return `${err.message}${causeText}`;
 }
 
-/** Send the order to Telegram via the Bot API. Token stays server-side. */
+/**
+ * Отправить заявку в Telegram владельца: целиком или, в режиме с Posiflora,
+ * только уведомление (см. notifyOnly). Токен остаётся на сервере.
+ */
 export async function sendOrderToTelegram(data: OrderInput): Promise<SendResult> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatIdsRaw = process.env.TELEGRAM_CHAT_ID;
@@ -90,7 +117,9 @@ export async function sendOrderToTelegram(data: OrderInput): Promise<SendResult>
   }
 
   const chatIds = chatIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const text = formatOrderMessage(data);
+  const text = notifyOnly()
+    ? formatOrderNotification()
+    : formatOrderMessage(data);
 
   // Ошибки URL/сети могут содержать полный адрес запроса вместе с токеном —
   // вычищаем его из всего, что уходит в логи.
@@ -127,7 +156,7 @@ export async function sendOrderToTelegram(data: OrderInput): Promise<SendResult>
   if (failed.length === results.length) {
     return { ok: false, error: failed.map((f) => f.error).join("; ") };
   }
-  // Частичный сбой — заявка дошла не всем получателям; без лога владелец
+  // Частичный сбой — уведомление дошло не всем получателям; без лога владелец
   // «отвалившегося» чата никогда об этом не узнает.
   if (failed.length > 0) {
     console.error(

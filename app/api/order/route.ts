@@ -5,8 +5,11 @@ import { sendOrderToTelegram } from "@/lib/telegram";
 export const runtime = "nodejs";
 
 // Лёгкий rate-limit: не больше 5 заявок с одного IP за 10 минут. Карта живёт
-// в памяти инстанса — на serverless это best-effort защита от спам-волны
-// в Telegram владельца, а не строгая гарантия (ботов попроще ловит honeypot).
+// в памяти процесса: в Docker-контейнере это честный лимит, при нескольких
+// репликах — best-effort (ботов попроще ловит honeypot).
+// IP берём из первого значения X-Forwarded-For: его можно подделать, зато
+// лимит никогда не склеит разных клиентов в одну корзину за общим прокси —
+// ложный отказ живому покупателю дороже пропущенного спама.
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_PER_WINDOW = 5;
 const hits = new Map<string, number[]>();
@@ -28,6 +31,30 @@ function rateLimited(ip: string): boolean {
   return false;
 }
 
+const MAX_BODY_BYTES = 10_000;
+
+/** Тело запроса строкой, или null — если оно длиннее лимита. */
+async function readBodyCapped(req: Request, limit: number): Promise<string | null> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > limit) return null;
+  if (!req.body) return "";
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 export async function POST(req: Request) {
   const ip =
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
@@ -41,9 +68,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // Форма шлёт сотни байт; всё сильно больше — не наша форма.
-  const contentLength = Number(req.headers.get("content-length") ?? 0);
-  if (contentLength > 10_000) {
+  // Форма шлёт сотни байт; всё сильно больше — не наша форма. Заголовку
+  // Content-Length верить нельзя (при chunked его просто нет), поэтому тело
+  // читаем сами и обрываем, как только перевалили за лимит.
+  const body = await readBodyCapped(req, MAX_BODY_BYTES);
+  if (body === null) {
     return NextResponse.json(
       { ok: false, error: "Некорректный запрос" },
       { status: 413 },
@@ -52,7 +81,7 @@ export async function POST(req: Request) {
 
   let payload: unknown;
   try {
-    payload = await req.json();
+    payload = JSON.parse(body);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Некорректный запрос" },

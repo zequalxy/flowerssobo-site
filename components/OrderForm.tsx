@@ -1,7 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { AnimatePresence, motion } from "framer-motion";
@@ -39,27 +46,58 @@ function formatPhone(input: string): string {
   return res;
 }
 
+/**
+ * Подпись + поле. Одиночное поле оборачивается в <label>; группа своих
+ * <label> (чекбоксы способов связи) — в role="group": вложенные <label>
+ * запрещены HTML, и скринридер путался, что к чему относится.
+ */
 function Field({
   label,
   required,
   error,
   children,
   className,
+  group,
 }: {
   label: string;
   required?: boolean;
   error?: string;
   children: ReactNode;
   className?: string;
+  group?: boolean;
 }) {
+  const labelId = useId();
+  const caption = (
+    <span
+      id={labelId}
+      className="text-xs font-semibold uppercase tracking-[0.14em] text-muted"
+    >
+      {label}
+      {required ? <span className="text-rose"> *</span> : null}
+    </span>
+  );
+  const errorText = error ? (
+    <span className="text-xs text-rose">{error}</span>
+  ) : null;
+
+  if (group) {
+    return (
+      <div
+        role="group"
+        aria-labelledby={labelId}
+        className={cn("flex flex-col gap-2", className)}
+      >
+        {caption}
+        {children}
+        {errorText}
+      </div>
+    );
+  }
   return (
     <label className={cn("flex flex-col gap-2", className)}>
-      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
-        {label}
-        {required ? <span className="text-rose"> *</span> : null}
-      </span>
+      {caption}
       {children}
-      {error ? <span className="text-xs text-rose">{error}</span> : null}
+      {errorText}
     </label>
   );
 }
@@ -188,6 +226,7 @@ export function OrderForm() {
     handleSubmit,
     reset,
     setValue,
+    getValues,
     control,
     formState: { errors, isSubmitting },
   } = useForm<OrderInput>({
@@ -204,6 +243,34 @@ export function OrderForm() {
     },
   });
 
+  // Строка комментария, которую подставили мы сами. Нужна, чтобы снять её,
+  // когда человек передумал и выбрал другое: свой текст при этом остаётся.
+  const autoComment = useRef<string | null>(null);
+
+  const applyPrefill = useCallback(
+    (next: { category?: string; comment?: string }) => {
+      if (next.category) setValue("category", next.category);
+
+      const prev = autoComment.current;
+      const current = getValues("comment") ?? "";
+      const manual = (prev && current.includes(prev)
+        ? current.replace(prev, "")
+        : current
+      )
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+
+      const added = next.comment ?? null;
+      setValue(
+        "comment",
+        added ? (manual ? `${manual}\n${added}` : added) : manual,
+        { shouldDirty: true },
+      );
+      autoComment.current = added;
+    },
+    [getValues, setValue],
+  );
+
   // Pre-fill when a catalog card (string) or a bouquet card (object) is clicked.
   useEffect(() => {
     function onPrefill(e: Event) {
@@ -211,18 +278,17 @@ export function OrderForm() {
         e as CustomEvent<string | { category?: string; comment?: string }>
       ).detail;
       if (!detail) return;
-      if (typeof detail === "string") {
-        setValue("category", detail);
-        return;
-      }
-      if (detail.category) setValue("category", detail.category);
-      if (detail.comment) setValue("comment", detail.comment, { shouldDirty: true });
+      applyPrefill(
+        typeof detail === "string" ? { category: detail } : detail,
+      );
     }
     window.addEventListener("flowerssobo:prefill", onPrefill);
     return () => window.removeEventListener("flowerssobo:prefill", onPrefill);
-  }, [setValue]);
+  }, [applyPrefill]);
 
   async function onSubmit(data: OrderInput) {
+    let message =
+      "Не удалось отправить. Позвоните нам или напишите в мессенджер.";
     try {
       const res = await fetch("/api/order", {
         method: "POST",
@@ -232,20 +298,25 @@ export function OrderForm() {
         signal: AbortSignal.timeout(15_000),
       });
       const json = (await res.json()) as { ok: boolean; error?: string };
-      if (!res.ok || !json.ok) throw new Error(json.error ?? "fail");
+      if (!res.ok || !json.ok) {
+        // Сервер отвечает понятной фразой (лимит заявок, сбой доставки) —
+        // её и показываем; сеть/таймаут/не-JSON остаются с общей фразой.
+        if (json.error) message = json.error;
+        throw new Error("order rejected");
+      }
 
       toast.success("Заявка отправлена! Скоро свяжемся.");
+      // Строку, подставленную из витрины, чистить не нужно: reset() обнулил
+      // поле, и applyPrefill её уже не найдёт.
       reset();
       setDone(true);
     } catch {
-      toast.error(
-        "Не удалось отправить. Позвоните нам или напишите в мессенджер.",
-      );
+      toast.error(message);
     }
   }
 
   return (
-    <section id="order" className="relative scroll-mt-24 py-24 md:py-32">
+    <section className="relative py-24 md:py-32">
       <div className="mx-auto grid max-w-[1400px] grid-cols-1 items-stretch gap-12 px-5 md:px-10 lg:grid-cols-12 lg:gap-14">
         {/* Bouquet beside the form — an exotic statement piece */}
         <div className="lg:col-span-5">
@@ -270,8 +341,8 @@ export function OrderForm() {
           </div>
         </div>
 
-        {/* Form */}
-        <div className="lg:col-span-7">
+        {/* Form — сюда ведёт якорь #order, мимо фото слева/сверху */}
+        <div id="order" className="scroll-mt-24 lg:col-span-7">
           <p className="eyebrow">Заявка</p>
           <h2 className="mt-4 text-balance text-4xl tracking-tight md:text-5xl">
             Персональный подбор цветов
@@ -384,6 +455,7 @@ export function OrderForm() {
                 <Field
                   label="Способ связи"
                   required
+                  group
                   className="sm:col-span-2"
                   error={errors.contactMethods?.message}
                 >
@@ -411,7 +483,10 @@ export function OrderForm() {
                     render={({ field }) => (
                       <CustomSelect
                         value={field.value ?? ""}
-                        onChange={field.onChange}
+                        onChange={(v) => {
+                          field.onChange(v);
+                          applyPrefill({});
+                        }}
                         options={categoryOptions}
                         placeholder="Необязательно — подскажем сами"
                       />
@@ -472,12 +547,8 @@ export function OrderForm() {
                         rel="noopener noreferrer"
                         className="text-ink underline underline-offset-2 transition-colors hover:text-rose"
                       >
-                        Политикой конфиденциальности
+                        Положением о конфиденциальности
                       </a>
-                      <span className="mt-1 block text-xs text-faint">
-                        Заявка поступит нам через мессенджер Telegram — данные
-                        передаются на его серверы за пределами РФ
-                      </span>
                     </span>
                   </label>
                   {errors.consent ? (
