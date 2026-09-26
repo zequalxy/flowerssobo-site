@@ -58,6 +58,9 @@ export function formatOrderMessage(
 
 type SendResult = { ok: true } | { ok: false; error: string };
 
+/** Результат отправки одному получателю — с chat_id, чтобы лог назвал виновника. */
+type ChatResult = { ok: true } | { ok: false; error: string; chatId: string };
+
 /**
  * Раскрывает undici-шную «fetch failed» до реальной причины (ENOTFOUND,
  * ETIMEDOUT, ECONNREFUSED…) — иначе по логам не понять, DNS это или файрвол.
@@ -102,7 +105,7 @@ export async function sendOrderToTelegram(
   // вычищаем его из всего, что уходит в логи.
   const redact = (s: string) => s.split(token).join("<TOKEN>");
 
-  const sendOne = async (chatId: string): Promise<SendResult> => {
+  const sendOne = async (chatId: string): Promise<ChatResult> => {
     try {
       const res = await fetch(
         `${apiBase}/bot${token}/sendMessage`,
@@ -120,25 +123,36 @@ export async function sendOrderToTelegram(
       );
       if (!res.ok) {
         const body = await res.text();
-        return { ok: false, error: redact(`Telegram API ${res.status}: ${body}`) };
+        return {
+          ok: false,
+          chatId,
+          error: redact(`Telegram API ${res.status}: ${body}`),
+        };
       }
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: redact(describeError(err)) };
+      return { ok: false, chatId, error: redact(describeError(err)) };
     }
   };
 
   const results = await Promise.all(chatIds.map(sendOne));
-  const failed = results.filter((r): r is { ok: false; error: string } => !r.ok);
+  const failed = results.filter(
+    (r): r is { ok: false; error: string; chatId: string } => !r.ok,
+  );
+  // chat_id в сообщении обязателен: иначе при нескольких получателях
+  // непонятно, какой из них отвалился, и виновника ищут перебором.
+  const describeFailures = () =>
+    failed.map((f) => `${f.chatId}: ${f.error}`).join("; ");
+
   if (failed.length === results.length) {
-    return { ok: false, error: failed.map((f) => f.error).join("; ") };
+    return { ok: false, error: describeFailures() };
   }
   // Частичный сбой — заявка дошла не всем получателям; без лога владелец
   // «отвалившегося» чата никогда об этом не узнает.
   if (failed.length > 0) {
     console.error(
       `Telegram partial fail (${failed.length}/${results.length}):`,
-      failed.map((f) => f.error).join("; "),
+      describeFailures(),
     );
   }
   return { ok: true };
