@@ -57,7 +57,13 @@ npm run dev                  # http://localhost:3000
   `POSIFLORA_DOC_PREFIX` — префикс номера документа (по умолчанию `site`).
   Где взять UUID — ниже, «Как найти идентификаторы Posiflora»;
 - `TELEGRAM_BOT_TOKEN` — токен бота, которому уходят уведомления;
-- `TELEGRAM_CHAT_ID` — chat_id получателя; несколько — через запятую.
+- `TELEGRAM_CHAT_ID` — chat_id получателя; несколько — через запятую;
+- `TELEGRAM_NOTIFY_ONLY` — `1`, если заявки хранятся в Posiflora: тогда в
+  Telegram уходит только уведомление «новая заявка» с номером заказа, без
+  персональных данных. **Включать только там, где интеграция с Posiflora
+  действительно работает** — иначе заявка целиком никуда не попадёт;
+- `TELEGRAM_API_BASE` — необязательно: адрес прокси/зеркала Bot API, если
+  хостинг не выпускает трафик к `api.telegram.org` напрямую.
 
 Если переменные Posiflora не заданы, интеграция считается выключённой и
 заявка уходит только в Telegram. Без Telegram-переменных сайт тоже
@@ -119,7 +125,9 @@ docker run -p 3000:3000 \
   -e POSIFLORA_STORE_ID=... \
   -e TELEGRAM_BOT_TOKEN=... \
   -e TELEGRAM_CHAT_ID=... \
+  -e TELEGRAM_NOTIFY_ONLY=1 \
   flowerssobo
+# TELEGRAM_NOTIFY_ONLY=1 — только при подключённой Posiflora (см. выше)
 ```
 
 Multi-stage образ на `node:22-alpine` со standalone-выводом Next
@@ -133,19 +141,21 @@ Multi-stage образ на `node:22-alpine` со standalone-выводом Next
 app/
   page.tsx           # единственная страница-лендинг (композиция секций)
   layout.tsx         # шрифты, метаданные, JSON-LD, тосты
-  privacy/           # политика обработки персональных данных (152-ФЗ)
-  api/order/         # приём заявки: rate-limit → zod → Posiflora → Telegram
-  icon.tsx, robots.ts, sitemap.ts, not-found.tsx, error.tsx
+  privacy/, consent/ # Положение о конфиденциальности и Согласие на обработку ПДн (152-ФЗ)
+  api/order/         # заявка: rate-limit → лимит тела → zod → Posiflora → Telegram
+  icon.tsx, robots.ts, sitemap.ts, not-found.tsx, error.tsx, global-error.tsx
 components/
-  Hero, Season, Categories, Showcase, ProductCard, ProductDetail,
-  Faq, Reviews, OrderForm, Contacts, Footer, Nav, FloatingContacts, ui/
+  Hero, Season, Categories, CategoryCard, CategoryDetail, Showcase,
+  ProductCard, ProductDetail, Faq, Reviews, OrderForm, Contacts, Footer,
+  Nav, FloatingContacts, LegalPage, ui/
 lib/
   site.ts            # единая точка правды: контакты, ссылки, реквизиты
   products.ts        # витрина: цена за штуку, варианты количества, упаковка
   posiflora.ts       # сессия Posiflora (логин/refresh) + создание заказа
   catalog.ts, faq.ts, reviews.ts, schema.ts, telegram.ts, utils.ts
 public/
-  images/, video/, og.jpg
+  images/            # detail/ — кадры 4:5 для витрины и раскрытых карточек
+  video/, og.jpg
 ```
 
 ## Заметки по реализации
@@ -183,6 +193,10 @@ public/
 - Карусель отзывов держит позицию в `(-half, 0]` по модулю половины ленты —
   контент задублирован, поэтому стык невидим; автопрокрутка и палец двигают
   одну и ту же координату.
+- Фото витрины и раскрытых карточек — заранее скадрированные кадры 4:5 в
+  `public/images/detail/` (композиция целиком, без полей). Заменили фото —
+  нужен новый кадр там же; исходники без кропа лежат в `products/` и
+  `catalog/`.
 - На Windows с кириллицей в пути проекта Turbopack требует явный
   `turbopack.root` в `next.config.ts` — иначе паника «char boundary»
   в именах чанков.

@@ -72,43 +72,35 @@ export function ProductDetail({
             ? { duration: 0.25, ease: EASE }
             : { type: "spring", bounce: 0.18, duration: 0.5 }
         }
-        className="pointer-events-auto flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[1.75rem] border border-line bg-bg-elev shadow-[0_-20px_60px_-30px_rgba(0,0,0,0.8)] md:max-h-[88dvh] md:w-[min(94vw,430px)] md:rounded-[1.75rem] md:shadow-[0_40px_90px_-40px_rgba(0,0,0,0.85)]"
+        className="pointer-events-auto flex max-h-[92dvh] w-full flex-col overflow-x-hidden overflow-y-auto rounded-t-[1.75rem] border border-line bg-bg-elev shadow-[0_-20px_60px_-30px_rgba(0,0,0,0.8)] md:max-h-[88dvh] md:w-[min(94vw,430px)] md:rounded-[1.75rem] md:shadow-[0_40px_90px_-40px_rgba(0,0,0,0.85)]"
       >
-        {/* Image — shorter than the tile so the whole card fits without scroll */}
-        <div className="relative h-[38dvh] w-full shrink-0 overflow-hidden sm:h-[42dvh]">
-          <motion.div
-            className="absolute inset-0"
-            animate={reduce ? undefined : { y: [0, -10, 0] }}
-            transition={
-              reduce
-                ? undefined
-                : { duration: 5, ease: "easeInOut", repeat: Infinity }
-            }
-          >
-            <Image
-              src={product.image}
-              alt={product.name}
-              fill
-              sizes="(max-width: 768px) 100vw, 430px"
-              className="object-cover"
-              style={{ objectPosition: product.imagePosition ?? "50% 50%" }}
-            />
-          </motion.div>
-          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-bg-elev via-transparent to-transparent" />
-
+        {/* Нулевой по высоте липкий слой: крестик не уезжает при прокрутке */}
+        <div className="sticky top-0 z-20 h-0">
           <button
             type="button"
             onClick={onClose}
             aria-label="Закрыть"
-            className="absolute right-3 top-3 z-10 flex size-9 items-center justify-center rounded-full border border-white/15 bg-black/35 text-white backdrop-blur-md transition-colors hover:bg-black/55 active:scale-95"
+            className="absolute right-3 top-3 flex size-9 items-center justify-center rounded-full border border-white/15 bg-black/35 text-white backdrop-blur-md transition-colors hover:bg-black/55 active:scale-95"
           >
             <X size={18} weight="bold" />
           </button>
         </div>
 
+        {/* Фото 4:5, заранее скадрированное по композиции (public/images/detail/)
+            — окно того же формата, поэтому кадр ложится один в один. */}
+        <div className="relative aspect-[4/5] w-full shrink-0 overflow-hidden">
+          <Image
+            src={product.image}
+            alt={product.name}
+            fill
+            sizes="(max-width: 768px) 100vw, 430px"
+            className="object-cover"
+          />
+        </div>
+
         {/* Content — fades up after the morph settles */}
         <motion.div
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6"
+          className="flex flex-col p-6"
           initial={reduce ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: reduce ? 0 : 0.16, duration: 0.4, ease: EASE }}
@@ -185,17 +177,21 @@ export function ProductDetail({
             </div>
           ) : null}
 
-          <button
-            type="button"
-            onClick={order}
-            className="mt-7 flex w-full items-center justify-center gap-2 rounded-full bg-rose px-6 py-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-rose-deep active:scale-[0.99]"
-          >
-            Заказать этот букет
-            <ArrowRight size={18} weight="bold" />
-          </button>
-          <p className="mt-3 text-center text-xs leading-relaxed text-faint">
-            Флорист подтвердит наличие и соберёт под ваш повод
-          </p>
+          {/* Кнопка прилипает к низу карточки: фото 4:5 крупное, и без этого
+              на телефоне заказ уезжал бы за край экрана */}
+          <div className="sticky bottom-0 -mx-6 -mb-6 mt-7 border-t border-line bg-bg-elev px-6 pb-6 pt-4">
+            <button
+              type="button"
+              onClick={order}
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-rose px-6 py-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-rose-deep active:scale-[0.99]"
+            >
+              Заказать этот букет
+              <ArrowRight size={18} weight="bold" />
+            </button>
+            <p className="mt-3 text-center text-xs leading-relaxed text-faint">
+              Флорист подтвердит наличие и соберёт под ваш повод
+            </p>
+          </div>
         </motion.div>
       </motion.div>
     </div>

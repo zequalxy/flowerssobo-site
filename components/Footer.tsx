@@ -77,7 +77,7 @@ export function Footer() {
           </p>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-5">
             <a href="/privacy" className="transition-colors hover:text-ink">
-              Политика конфиденциальности
+              Положение о конфиденциальности
             </a>
             <a href="/consent" className="transition-colors hover:text-ink">
               Согласие на обработку ПДн

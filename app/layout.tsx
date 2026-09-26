@@ -19,7 +19,7 @@ const daysSans = localFont({
   weight: "900",
 });
 
-const SITE_URL = "https://flowerssobo.ru";
+const SITE_URL = site.url;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),

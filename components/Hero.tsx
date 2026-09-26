@@ -106,6 +106,7 @@ export function Hero() {
           полноэкранное видео с лёгкой обрезкой по бокам вместо полос. */}
       <video
         ref={videoRef}
+        aria-hidden
         src="/video/hero.mp4"
         className="absolute inset-0 size-full object-cover"
         autoPlay
@@ -121,7 +122,15 @@ export function Hero() {
 
       {/* Minimal overlay: brand wordmark + single CTA */}
       <div className="relative z-10 flex flex-col items-center px-6 text-center">
-        <Logo className="max-w-full text-white text-[clamp(1.75rem,8.5vw,6rem)] drop-shadow-[0_2px_24px_rgba(0,0,0,0.45)]" />
+        {/* Единственный <h1> главной: визуально — только логотип, а
+            поисковику и скринридеру — о чём сайт */}
+        <h1 className="max-w-full">
+          <Logo className="text-white text-[clamp(1.75rem,8.5vw,6rem)] drop-shadow-[0_2px_24px_rgba(0,0,0,0.45)]" />
+          <span className="sr-only">
+            {" "}
+            — авторские букеты с доставкой по Липецку за 60–90 минут
+          </span>
+        </h1>
 
         <a
           href="#order"
