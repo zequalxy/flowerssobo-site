@@ -6,6 +6,12 @@ import type { NextConfig } from "next";
  * сайте нет вовсе, поэтому даже такой CSP отсекает основные векторы.
  */
 const securityHeaders = [
+  // HSTS: браузер сам уводит на https и не даёт перехватить первый заход по
+  // голому http. Учитывается только по HTTPS, поэтому локально безвреден;
+  // в dev не шлём, чтобы не «прилипал» к localhost за прокси.
+  ...(process.env.NODE_ENV === "production"
+    ? [{ key: "Strict-Transport-Security", value: "max-age=31536000" }]
+    : []),
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

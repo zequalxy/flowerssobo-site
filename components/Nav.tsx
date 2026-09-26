@@ -122,6 +122,9 @@ export function Nav() {
       <AnimatePresence>
         {open && (
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Меню"
             className="fixed inset-0 z-[60] flex flex-col bg-bg/95 backdrop-blur-2xl lg:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
