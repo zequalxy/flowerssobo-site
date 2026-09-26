@@ -62,13 +62,23 @@ type CachedSession = {
 let session: CachedSession | null = null;
 let pending: Promise<CachedSession> | null = null;
 
-/** Вычищает из текста всё, что нельзя писать в лог. */
+/**
+ * Вычищает из текста всё, что нельзя писать в лог.
+ *
+ * Короткие значения игнорируем: замена односимвольного «секрета» изрешетила бы
+ * весь лог (`Posiflora` → `Posiflo<REDACTED>a`) и спрятала бы сообщение об
+ * ошибке вместо того, чтобы прятать секрет. Настоящие пароли и токены длиннее.
+ */
+const MIN_SECRET_LENGTH = 8;
+
 function redact(text: string, cfg: PosifloraConfig): string {
   const secrets = [
     cfg.password,
     session?.accessToken,
     session?.refreshToken,
-  ].filter((s): s is string => Boolean(s));
+  ].filter(
+    (s): s is string => typeof s === "string" && s.length >= MIN_SECRET_LENGTH,
+  );
   return secrets.reduce(
     (acc, secret) => acc.split(secret).join("<REDACTED>"),
     text,
@@ -89,9 +99,26 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-type JsonApiErrors = {
-  errors?: Array<{ title?: unknown; detail?: unknown; code?: unknown }>;
+type JsonApiError = {
+  title?: unknown;
+  detail?: unknown;
+  code?: unknown;
+  /** JSON:API: `pointer` указывает на поле, которое не прошло валидацию. */
+  source?: { pointer?: unknown; parameter?: unknown } | null;
 };
+
+type JsonApiErrors = { errors?: JsonApiError[] };
+
+/** «This value should not be blank. [/data/attributes/docNo]» */
+function formatJsonApiError(e: JsonApiError): string {
+  const text = [e.title, e.detail]
+    .filter((v): v is string => typeof v === "string" && v !== "")
+    .join(": ");
+  const target = e.source?.pointer ?? e.source?.parameter;
+  const where = typeof target === "string" && target ? ` [${target}]` : "";
+  const code = typeof e.code === "string" && e.code ? ` (${e.code})` : "";
+  return `${text || "без описания"}${code}${where}`;
+}
 
 /** Тело похоже на HTML-страницу (nginx, балансировщик), а не на JSON:API. */
 function looksLikeHtml(body: string): boolean {
@@ -106,11 +133,7 @@ function looksLikeHtml(body: string): boolean {
 function describeApiError(status: number, body: string, where: string): string {
   try {
     const parsed = JSON.parse(body) as JsonApiErrors;
-    const details = (parsed.errors ?? [])
-      .map((e) =>
-        [e.title, e.detail].filter((v) => typeof v === "string").join(": "),
-      )
-      .filter(Boolean);
+    const details = (parsed.errors ?? []).map(formatJsonApiError).filter(Boolean);
     if (details.length > 0) {
       return `Posiflora ${status} на ${where}: ${details.join("; ")}`;
     }
@@ -316,9 +339,9 @@ function buildDescription(data: OrderInput): string {
   return lines.join("\n");
 }
 
-/** Связь JSON:API: ссылка на ресурс либо явный null, как в документации. */
-function ref(type: string, id: string | undefined) {
-  return { data: id ? { type, id } : null };
+/** Связь JSON:API: ссылка на ресурс. */
+function ref(type: string, id: string) {
+  return { data: { type, id } };
 }
 
 type OrderIds = {
@@ -339,22 +362,41 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         byBonuses: false,
         createdAt: timestamp,
         date: storeDate(now),
-        // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
-        delivery: false,
         description: buildDescription(data),
         fiscal: false,
         status: "new",
         updatedAt: timestamp,
+        // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
+        // Пустые строки и null-таймеры отправляем явно, как в примере из
+        // документации: сервер валидирует поля на «не пусто», а отсутствующее
+        // поле для него не то же самое, что пустое.
+        delivery: false,
+        deliveryApartment: "",
+        deliveryBuilding: "",
+        deliveryCity: "",
+        deliveryComments: "",
+        deliveryContact: "",
+        deliveryHouse: "",
+        deliveryPhoneCode: "",
+        deliveryPhoneNumber: "",
+        deliveryStreet: "",
+        deliveryTimeFrom: null,
+        deliveryTimeTo: null,
+        dueTime: null,
       },
       // Только те связи, что объявлены в схеме POST /v1/orders. Состав заказа
       // (lines) не шлём вовсе: с сайта приходит пожелание, а не корзина —
       // позиции добавит флорист.
       relationships: {
-        createdBy: ref("workers", ids.workerId),
+        // Заказ без клиента — контакты лежат в description. Явный null у
+        // customer и florist взят из примера документации, там он принимается.
         customer: { data: null },
         florist: { data: null },
-        source: ref("order-sources", ids.sourceId),
         store: ref("stores", ids.storeId),
+        // Необязательные связи: если id не задан, ключ не отправляем вовсе —
+        // «data: null» здесь документацией не подтверждён и валидацию не проходит.
+        ...(ids.sourceId ? { source: ref("order-sources", ids.sourceId) } : {}),
+        ...(ids.workerId ? { createdBy: ref("workers", ids.workerId) } : {}),
       },
     },
   };
