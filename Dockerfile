@@ -34,4 +34,6 @@ EXPOSE 3000
 # Заявки уходят в Telegram — передайте секреты при запуске:
 #   docker run -p 3000:3000 \
 #     -e TELEGRAM_BOT_TOKEN=... -e TELEGRAM_CHAT_ID=... flowerssobo
+# С подключённой Posiflora добавьте -e TELEGRAM_NOTIFY_ONLY=1 (в Telegram —
+# только уведомление без ПДн). Без Posiflora флаг НЕ ставить — см. README.
 CMD ["node", "server.js"]
