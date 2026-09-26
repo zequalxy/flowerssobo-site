@@ -348,18 +348,24 @@ type OrderIds = {
   storeId: string;
   sourceId?: string;
   workerId?: string;
-  /** Префикс номера документа; пусто — docNo не отправляем вовсе. */
-  docPrefix?: string;
+  /** Префикс номера документа. */
+  docPrefix: string;
 };
 
+/** Префикс номера документа по умолчанию. */
+const DEFAULT_DOC_PREFIX = "site";
+
 /**
- * Номер документа вида `site2609260483`: префикс, дата и случайный хвост.
+ * Номер документа вида `site2609263f8cfe`: префикс, дата и случайный хвост.
  *
- * По умолчанию docNo не отправляется — обычно номер присваивает Posiflora, и
- * свой формат сломал бы нумерацию магазина. Но если сервер требует поле
- * непустым (422 с pointer `/data/attributes/docNo`), достаточно задать
- * POSIFLORA_DOC_PREFIX — правки кода не нужны. Отдельный префикс заодно
- * отделяет заказы с сайта от заведённых на кассе.
+ * Posiflora требует непустой `docNo` — на пустом отвечает 422
+ * «This value should not be blank.» с указанием на `/data/docNo`, поэтому
+ * номер присваиваем сами. Префикс (POSIFLORA_DOC_PREFIX) отделяет заказы
+ * с сайта от заведённых на кассе.
+ *
+ * Хвост — шесть шестнадцатеричных символов, 16 млн вариантов на дату: если
+ * сервер требует уникальности, случайных совпадений можно не опасаться даже
+ * на сотнях заказов в день.
  */
 function buildDocNo(prefix: string, now: Date): string {
   const stamp = new Intl.DateTimeFormat("en-CA", {
@@ -370,7 +376,7 @@ function buildDocNo(prefix: string, now: Date): string {
   })
     .format(now)
     .replace(/\D/g, "");
-  const tail = String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
+  const tail = randomUUID().replace(/-/g, "").slice(0, 6);
   return `${prefix}${stamp}${tail}`;
 }
 
@@ -390,9 +396,7 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         fiscal: false,
         status: "new",
         updatedAt: timestamp,
-        ...(ids.docPrefix
-          ? { docNo: buildDocNo(ids.docPrefix, now) }
-          : {}),
+        docNo: buildDocNo(ids.docPrefix, now),
         // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
         // Пустые строки и null-таймеры отправляем явно, как в примере из
         // документации: сервер валидирует поля на «не пусто», а отсутствующее
@@ -512,7 +516,7 @@ export async function createPosifloraOrder(
       storeId,
       sourceId: process.env.POSIFLORA_SOURCE_ID,
       workerId: process.env.POSIFLORA_WORKER_ID ?? workerId ?? undefined,
-      docPrefix: process.env.POSIFLORA_DOC_PREFIX?.trim() || undefined,
+      docPrefix: process.env.POSIFLORA_DOC_PREFIX?.trim() || DEFAULT_DOC_PREFIX,
     };
     const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
     return { status: "created", order };
