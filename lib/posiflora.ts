@@ -355,29 +355,44 @@ type OrderIds = {
 /** Префикс номера документа по умолчанию. */
 const DEFAULT_DOC_PREFIX = "site";
 
+/** Posiflora отвечает 422, если docNo длиннее 12 символов. */
+const DOC_NO_MAX_LENGTH = 12;
+
+/** Сколько символов префикса оставляем случайному хвосту: минимум шесть. */
+const DOC_PREFIX_MAX_LENGTH = 6;
+
 /**
- * Номер документа вида `site2609263f8cfe`: префикс, дата и случайный хвост.
- *
- * Posiflora требует непустой `docNo` — на пустом отвечает 422
- * «This value should not be blank.» с указанием на `/data/docNo`, поэтому
- * номер присваиваем сами. Префикс (POSIFLORA_DOC_PREFIX) отделяет заказы
- * с сайта от заведённых на кассе.
- *
- * Хвост — шесть шестнадцатеричных символов, 16 млн вариантов на дату: если
- * сервер требует уникальности, случайных совпадений можно не опасаться даже
- * на сотнях заказов в день.
+ * Приводит префикс к тому, что Posiflora принимает в docNo: строчные буквы и
+ * цифры (как в примере из документации `aabn22000008`). Слишком длинный режем,
+ * пустой заменяем на префикс по умолчанию — иначе номер остался бы без метки
+ * источника.
  */
-function buildDocNo(prefix: string, now: Date): string {
-  const stamp = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Europe/Moscow",
-    year: "2-digit",
-    month: "2-digit",
-    day: "2-digit",
-  })
-    .format(now)
-    .replace(/\D/g, "");
-  const tail = randomUUID().replace(/-/g, "").slice(0, 6);
-  return `${prefix}${stamp}${tail}`;
+function normalizeDocPrefix(raw: string | undefined): string {
+  const cleaned = (raw ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, DOC_PREFIX_MAX_LENGTH);
+  return cleaned || DEFAULT_DOC_PREFIX;
+}
+
+/**
+ * Номер документа вида `site3f8cfe4d` — ровно 12 символов, как требует
+ * Posiflora: на пустом docNo она отвечает «This value should not be blank.»,
+ * на длинном — «This value is too long. It should have 12 characters or less.»
+ *
+ * Префикс отделяет заказы с сайта от заведённых на кассе, остаток добивается
+ * случайными шестнадцатеричными символами. При префиксе по умолчанию это
+ * восемь символов, свыше четырёх миллиардов вариантов — если сервер требует
+ * уникальности, совпадений можно не опасаться. Дату в номер не кладём: она и
+ * так лежит в самом заказе, а 12 символов лучше отдать под уникальность.
+ */
+function buildDocNo(prefix: string): string {
+  const tailLength = DOC_NO_MAX_LENGTH - prefix.length;
+  let tail = "";
+  while (tail.length < tailLength) {
+    tail += randomUUID().replace(/-/g, "");
+  }
+  return `${prefix}${tail.slice(0, tailLength)}`;
 }
 
 function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
@@ -396,7 +411,7 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         fiscal: false,
         status: "new",
         updatedAt: timestamp,
-        docNo: buildDocNo(ids.docPrefix, now),
+        docNo: buildDocNo(ids.docPrefix),
         // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
         // Пустые строки и null-таймеры отправляем явно, как в примере из
         // документации: сервер валидирует поля на «не пусто», а отсутствующее
@@ -516,7 +531,7 @@ export async function createPosifloraOrder(
       storeId,
       sourceId: process.env.POSIFLORA_SOURCE_ID,
       workerId: process.env.POSIFLORA_WORKER_ID ?? workerId ?? undefined,
-      docPrefix: process.env.POSIFLORA_DOC_PREFIX?.trim() || DEFAULT_DOC_PREFIX,
+      docPrefix: normalizeDocPrefix(process.env.POSIFLORA_DOC_PREFIX),
     };
     const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
     return { status: "created", order };
