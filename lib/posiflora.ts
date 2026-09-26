@@ -62,13 +62,23 @@ type CachedSession = {
 let session: CachedSession | null = null;
 let pending: Promise<CachedSession> | null = null;
 
-/** Вычищает из текста всё, что нельзя писать в лог. */
+/**
+ * Вычищает из текста всё, что нельзя писать в лог.
+ *
+ * Короткие значения игнорируем: замена односимвольного «секрета» изрешетила бы
+ * весь лог (`Posiflora` → `Posiflo<REDACTED>a`) и спрятала бы сообщение об
+ * ошибке вместо того, чтобы прятать секрет. Настоящие пароли и токены длиннее.
+ */
+const MIN_SECRET_LENGTH = 8;
+
 function redact(text: string, cfg: PosifloraConfig): string {
   const secrets = [
     cfg.password,
     session?.accessToken,
     session?.refreshToken,
-  ].filter((s): s is string => Boolean(s));
+  ].filter(
+    (s): s is string => typeof s === "string" && s.length >= MIN_SECRET_LENGTH,
+  );
   return secrets.reduce(
     (acc, secret) => acc.split(secret).join("<REDACTED>"),
     text,
@@ -89,28 +99,62 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-type JsonApiErrors = {
-  errors?: Array<{ title?: unknown; detail?: unknown; code?: unknown }>;
+type JsonApiError = {
+  title?: unknown;
+  detail?: unknown;
+  code?: unknown;
+  /** JSON:API: `pointer` указывает на поле, которое не прошло валидацию. */
+  source?: { pointer?: unknown; parameter?: unknown } | null;
 };
+
+type JsonApiErrors = { errors?: JsonApiError[] };
+
+/** «This value should not be blank. [/data/attributes/docNo]» */
+function formatJsonApiError(e: JsonApiError): string {
+  const text = [e.title, e.detail]
+    .filter((v): v is string => typeof v === "string" && v !== "")
+    .join(": ");
+  const target = e.source?.pointer ?? e.source?.parameter;
+  const where = typeof target === "string" && target ? ` [${target}]` : "";
+  const code = typeof e.code === "string" && e.code ? ` (${e.code})` : "";
+  return `${text || "без описания"}${code}${where}`;
+}
+
+/** Тело похоже на HTML-страницу (nginx, балансировщик), а не на JSON:API. */
+function looksLikeHtml(body: string): boolean {
+  return /^\s*<(?:!doctype|html|head|body)/i.test(body.trim());
+}
 
 /**
  * Posiflora возвращает ошибки массивом `errors` по JSON:API. Собираем из них
- * читаемую строку; если тело не разобралось — отдаём сырой текст, урезанный,
- * чтобы HTML-страница от балансировщика не утащила в лог килобайты.
+ * читаемую строку. `where` — метод и путь: без него по логу не понять, что
+ * упало, логин или создание заказа.
  */
-function describeApiError(status: number, body: string): string {
+function describeApiError(status: number, body: string, where: string): string {
   try {
     const parsed = JSON.parse(body) as JsonApiErrors;
-    const details = (parsed.errors ?? [])
-      .map((e) =>
-        [e.title, e.detail].filter((v) => typeof v === "string").join(": "),
-      )
-      .filter(Boolean);
-    if (details.length > 0) return `Posiflora ${status}: ${details.join("; ")}`;
+    const details = (parsed.errors ?? []).map(formatJsonApiError).filter(Boolean);
+    if (details.length > 0) {
+      return `Posiflora ${status} на ${where}: ${details.join("; ")}`;
+    }
   } catch {
-    // Не JSON — ниже уйдёт сырой ответ.
+    // Не JSON — разбираем ниже.
   }
-  return `Posiflora ${status}: ${body.slice(0, 300)}`;
+
+  // HTML вместо JSON:API означает, что запрос вообще не дошёл до API: его
+  // принял веб-сервер. При 404/405 это почти всегда обрезанный
+  // POSIFLORA_API_URL — база должна включать /api. Саму страницу в лог не
+  // тащим: от неё только килобайты разметки.
+  if (looksLikeHtml(body)) {
+    const hint =
+      status === 404 || status === 405
+        ? " Проверьте POSIFLORA_API_URL: база должна заканчиваться на /api," +
+          " например https://ваш-аккаунт.posiflora.com/api"
+        : "";
+    return `Posiflora ${status} на ${where}: вместо JSON:API пришла HTML-страница.${hint}`;
+  }
+
+  return `Posiflora ${status} на ${where}: ${body.slice(0, 300)}`;
 }
 
 function requireString(value: unknown, field: string): string {
@@ -163,6 +207,7 @@ async function requestSession(
   method: "POST" | "PATCH",
   attributes: Record<string, string>,
 ): Promise<CachedSession> {
+  const where = `${method} /v1/sessions`;
   let res: Response;
   try {
     res = await fetch(`${cfg.baseUrl}/v1/sessions`, {
@@ -172,16 +217,18 @@ async function requestSession(
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`${where}: ${describeError(err)}`, cfg));
   }
 
   const body = await res.text();
-  if (!res.ok) throw new Error(redact(describeApiError(res.status, body), cfg));
+  if (!res.ok) {
+    throw new Error(redact(describeApiError(res.status, body, where), cfg));
+  }
 
   try {
     return toSession(JSON.parse(body));
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`${where}: ${describeError(err)}`, cfg));
   }
 }
 
@@ -292,16 +339,46 @@ function buildDescription(data: OrderInput): string {
   return lines.join("\n");
 }
 
-/** Связь JSON:API: ссылка на ресурс либо явный null, как в документации. */
-function ref(type: string, id: string | undefined) {
-  return { data: id ? { type, id } : null };
+/** Связь JSON:API: ссылка на ресурс. */
+function ref(type: string, id: string) {
+  return { data: { type, id } };
 }
 
 type OrderIds = {
   storeId: string;
   sourceId?: string;
   workerId?: string;
+  /** Префикс номера документа. */
+  docPrefix: string;
 };
+
+/** Префикс номера документа по умолчанию. */
+const DEFAULT_DOC_PREFIX = "site";
+
+/**
+ * Номер документа вида `site2609263f8cfe`: префикс, дата и случайный хвост.
+ *
+ * Posiflora требует непустой `docNo` — на пустом отвечает 422
+ * «This value should not be blank.» с указанием на `/data/docNo`, поэтому
+ * номер присваиваем сами. Префикс (POSIFLORA_DOC_PREFIX) отделяет заказы
+ * с сайта от заведённых на кассе.
+ *
+ * Хвост — шесть шестнадцатеричных символов, 16 млн вариантов на дату: если
+ * сервер требует уникальности, случайных совпадений можно не опасаться даже
+ * на сотнях заказов в день.
+ */
+function buildDocNo(prefix: string, now: Date): string {
+  const stamp = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Moscow",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(now)
+    .replace(/\D/g, "");
+  const tail = randomUUID().replace(/-/g, "").slice(0, 6);
+  return `${prefix}${stamp}${tail}`;
+}
 
 function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
   const timestamp = isoSeconds(now);
@@ -315,22 +392,42 @@ function buildOrderPayload(data: OrderInput, ids: OrderIds, now: Date) {
         byBonuses: false,
         createdAt: timestamp,
         date: storeDate(now),
-        // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
-        delivery: false,
         description: buildDescription(data),
         fiscal: false,
         status: "new",
         updatedAt: timestamp,
+        docNo: buildDocNo(ids.docPrefix, now),
+        // Адрес доставки форма не собирает — менеджер уточняет его при звонке.
+        // Пустые строки и null-таймеры отправляем явно, как в примере из
+        // документации: сервер валидирует поля на «не пусто», а отсутствующее
+        // поле для него не то же самое, что пустое.
+        delivery: false,
+        deliveryApartment: "",
+        deliveryBuilding: "",
+        deliveryCity: "",
+        deliveryComments: "",
+        deliveryContact: "",
+        deliveryHouse: "",
+        deliveryPhoneCode: "",
+        deliveryPhoneNumber: "",
+        deliveryStreet: "",
+        deliveryTimeFrom: null,
+        deliveryTimeTo: null,
+        dueTime: null,
       },
       // Только те связи, что объявлены в схеме POST /v1/orders. Состав заказа
       // (lines) не шлём вовсе: с сайта приходит пожелание, а не корзина —
       // позиции добавит флорист.
       relationships: {
-        createdBy: ref("workers", ids.workerId),
+        // Заказ без клиента — контакты лежат в description. Явный null у
+        // customer и florist взят из примера документации, там он принимается.
         customer: { data: null },
         florist: { data: null },
-        source: ref("order-sources", ids.sourceId),
         store: ref("stores", ids.storeId),
+        // Необязательные связи: если id не задан, ключ не отправляем вовсе —
+        // «data: null» здесь документацией не подтверждён и валидацию не проходит.
+        ...(ids.sourceId ? { source: ref("order-sources", ids.sourceId) } : {}),
+        ...(ids.workerId ? { createdBy: ref("workers", ids.workerId) } : {}),
       },
     },
   };
@@ -365,11 +462,15 @@ async function postOrder(
       res = await send();
     }
   } catch (err) {
-    throw new Error(redact(describeError(err), cfg));
+    throw new Error(redact(`POST /v1/orders: ${describeError(err)}`, cfg));
   }
 
   const body = await res.text();
-  if (!res.ok) throw new Error(redact(describeApiError(res.status, body), cfg));
+  if (!res.ok) {
+    throw new Error(
+      redact(describeApiError(res.status, body, "POST /v1/orders"), cfg),
+    );
+  }
 
   let parsed: OrderResponse;
   try {
@@ -415,6 +516,7 @@ export async function createPosifloraOrder(
       storeId,
       sourceId: process.env.POSIFLORA_SOURCE_ID,
       workerId: process.env.POSIFLORA_WORKER_ID ?? workerId ?? undefined,
+      docPrefix: process.env.POSIFLORA_DOC_PREFIX?.trim() || DEFAULT_DOC_PREFIX,
     };
     const order = await postOrder(cfg, buildOrderPayload(data, ids, new Date()));
     return { status: "created", order };
