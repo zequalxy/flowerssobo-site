@@ -7,8 +7,15 @@ export type Category = {
   formValue: string;
   /** CSS object-position for the tile crop, when center isn't ideal. */
   objectPosition?: string;
+  /**
+   * Кадр 4:5 для раскрытой карточки (public/images/detail/cat-<slug>.jpg),
+   * скадрированный по композиции. Плитка берёт `image` — у неё своя форма в бенто.
+   */
+  detailImage: string;
   /** Full-width banner (spans all columns) — drives a wider `next/image` sizes. */
   wide?: boolean;
+  /** Full-width только на мобильном — иначе next/image просит картинку под 50vw и мылит её. */
+  wideOnMobile?: boolean;
 };
 
 /**
@@ -22,6 +29,7 @@ export const categories: Category[] = [
     title: "Моно",
     blurb: "Один сорт, чистая форма и акцент на сам цветок.",
     image: "/images/catalog/mono.jpg",
+    detailImage: "/images/detail/cat-mono.jpg",
     formValue: "Монобукет",
     objectPosition: "50% 38%",
   },
@@ -30,6 +38,7 @@ export const categories: Category[] = [
     title: "Букет-гигант",
     blurb: "Максимальный объём для тех случаев, когда хочется впечатлить.",
     image: "/images/catalog/giant.jpg",
+    detailImage: "/images/detail/cat-giant.jpg",
     formValue: "Букет-гигант",
     objectPosition: "50% 38%",
   },
@@ -38,6 +47,7 @@ export const categories: Category[] = [
     title: "Трендовый",
     blurb: "Собран в актуальной эстетике: модные цветы, оттенки и сочетания.",
     image: "/images/catalog/trend.jpg",
+    detailImage: "/images/detail/cat-trend.jpg",
     formValue: "Трендовый букет",
     objectPosition: "50% 42%",
   },
@@ -46,39 +56,48 @@ export const categories: Category[] = [
     title: "Кастомный",
     blurb: "Соберём под вас: по оттенкам, настроению, формату и бюджету.",
     image: "/images/catalog/custom.jpg",
+    detailImage: "/images/detail/cat-custom.jpg",
     formValue: "Кастомный букет",
-    objectPosition: "50% 42%",
-  },
-  {
-    slug: "jute",
-    title: "Джутовые котомки",
-    blurb: "Цветы в плетёном джутовом кашпо — готовый подарок, ваза не нужна.",
-    image: "/images/catalog/jute.jpg",
-    formValue: "Цветы в джутовой котомке",
-    objectPosition: "50% 50%",
-  },
-  {
-    slug: "interior",
-    title: "Интерьерный",
-    blurb: "Композиции для дома, ресторана, лобби отеля или офиса, собранные под стилистику пространства.",
-    image: "/images/catalog/interior.jpg",
-    formValue: "Интерьерная композиция",
-    objectPosition: "50% 58%",
+    objectPosition: "50% 55%",
   },
   {
     slug: "wedding",
     title: "Свадебный",
     blurb: "Букет невесты и оформление — от каллы до выездной церемонии.",
     image: "/images/catalog/wedding.jpg",
+    detailImage: "/images/detail/cat-wedding.jpg",
     formValue: "Свадебная флористика",
-    // Букет в кадре ниже центра — на широких мобильных плитках 34% показывал плечо.
-    objectPosition: "48% 56%",
+    // Каскадный букет занимает нижние две трети кадра — смещаем окно вниз,
+    // иначе в плитку попадает пустая стена, а не цветы.
+    objectPosition: "50% 70%",
+  },
+  {
+    slug: "interior",
+    title: "Интерьерный",
+    blurb: "Композиции для дома, ресторана, лобби отеля или офиса, собранные под стилистику пространства.",
+    image: "/images/catalog/interior.jpg",
+    detailImage: "/images/detail/cat-interior.jpg",
+    formValue: "Интерьерная композиция",
+    objectPosition: "50% 58%",
+  },
+  {
+    slug: "jute",
+    title: "Джутовые котомки",
+    blurb: "Цветы в плетёном джутовом кашпо — готовый подарок, ваза не нужна.",
+    image: "/images/catalog/jute.jpg",
+    detailImage: "/images/detail/cat-jute.jpg",
+    formValue: "Цветы в джутовой котомке",
+    wideOnMobile: true,
+    // Файл уже обрезан по композиции (снята пустая стена сверху), так что
+    // букет с котомкой сидит по центру кадра — смещать окно не нужно.
+    objectPosition: "50% 50%",
   },
   {
     slug: "business",
     title: "Цветы для бизнеса",
     blurb: "Поставки свежих цветов для компаний, мероприятий и оформления на специальных условиях.",
     image: "/images/catalog/business.jpg",
+    detailImage: "/images/detail/cat-business.jpg",
     formValue: "Цветы для бизнеса",
     objectPosition: "50% 50%",
     wide: true,

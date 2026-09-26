@@ -30,11 +30,13 @@ export type RawProduct = {
   stems?: StemPricing;
   /** Pre-fills the order form's category when «Заказать» is pressed. */
   formCategory: string;
-  image: string;
   /**
-   * CSS object-position для кропа фото: точка на букете, а не на лице
-   * флориста (на большинстве снимков лицо сверху, букет ниже центра).
+   * Фото 4:5, уже скадрированное по композиции (public/images/detail/) —
+   * и плитка витрины, и раскрытая карточка тоже 4:5, так что кадр совпадает
+   * один в один. Исходники без кропа лежат в public/images/products/.
    */
+  image: string;
+  /** CSS object-position — нужен только для нескадрированных (архивных) фото. */
   imagePosition?: string;
 };
 
@@ -52,8 +54,7 @@ const raw: RawProduct[] = [
     flowers: ["Кустовая роза"],
     stems: { perStem: 458, options: [9, 15, 19, 25, 51, 101] },
     formCategory: "Монобукет",
-    image: "/images/products/kustovaya-roza-mix.jpg",
-    imagePosition: "50% 55%",
+    image: "/images/detail/kustovaya-roza-mix.jpg",
   },
   {
     slug: "eustoma-belaya",
@@ -63,8 +64,7 @@ const raw: RawProduct[] = [
     flowers: ["Эустома"],
     stems: { perStem: 398, options: [9, 11, 15, 19, 25], photoCount: 19 },
     formCategory: "Монобукет",
-    image: "/images/products/eustoma-belaya.jpg",
-    imagePosition: "50% 66%",
+    image: "/images/detail/eustoma-belaya.jpg",
   },
   {
     slug: "krasnaya-roza",
@@ -74,8 +74,7 @@ const raw: RawProduct[] = [
     flowers: ["Красная роза"],
     stems: { perStem: 260, options: [9, 15, 19, 25, 51, 101], photoCount: 25 },
     formCategory: "Монобукет",
-    image: "/images/products/krasnaya-roza.jpg",
-    imagePosition: "50% 55%",
+    image: "/images/detail/krasnaya-roza.jpg",
   },
   {
     slug: "gortenziya-sad-roza",
@@ -85,8 +84,7 @@ const raw: RawProduct[] = [
     flowers: ["Гортензия", "Маттиола", "Садовая роза"],
     price: 10000,
     formCategory: "Кастомный букет",
-    image: "/images/products/gortenziya-sad-roza.jpg",
-    imagePosition: "50% 66%",
+    image: "/images/detail/gortenziya-sad-roza.jpg",
   },
   {
     slug: "mattiola-belaya",
@@ -96,8 +94,7 @@ const raw: RawProduct[] = [
     flowers: ["Маттиола"],
     stems: { perStem: 388, options: [9, 11, 15, 21, 25] },
     formCategory: "Монобукет",
-    image: "/images/products/mattiola-belaya.jpg",
-    imagePosition: "50% 58%",
+    image: "/images/detail/mattiola-belaya.jpg",
   },
   {
     slug: "roza-51-korobka",
@@ -113,8 +110,7 @@ const raw: RawProduct[] = [
       packaging: { 15: 360, 19: 360, 25: 360, 29: 420, 33: 420, 51: 420 },
     },
     formCategory: "Букет-гигант",
-    image: "/images/products/roza-51-korobka.jpg",
-    imagePosition: "50% 55%",
+    image: "/images/detail/roza-51-korobka.jpg",
   },
   {
     slug: "diantus-mix",
@@ -124,7 +120,7 @@ const raw: RawProduct[] = [
     flowers: ["Диантус"],
     stems: { perStem: 128, options: [15, 25, 51, 101] },
     formCategory: "Монобукет",
-    image: "/images/products/diantus-mix.jpg",
+    image: "/images/detail/diantus-mix.jpg",
   },
 ];
 

@@ -1,27 +1,47 @@
-import { categories } from "@/lib/catalog";
+"use client";
+
+import { useCallback, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { categories, type Category } from "@/lib/catalog";
 import { CategoryCard } from "@/components/CategoryCard";
+import { CategoryDetail } from "@/components/CategoryDetail";
 import { Reveal } from "@/components/ui/Reveal";
+
+const EASE: [number, number, number, number] = [0.23, 1, 0.32, 1];
 
 /**
  * Tile placement per slug. Mobile (2 cols) flows in DOM order with the two tall
- * photos (giant, jute) spanning two rows and the wedding + business banners
- * full-width. Desktop (lg, 3 cols) pins each tile to an explicit cell — a
- * composed 3×3 collage (mono · giant(tall) · trend / custom · — · jute(tall) /
- * interior · wedding · —), with the B2B banner spanning all three columns on a
- * fourth row below.
+ * photos (giant, wedding) spanning two rows and the jute + business banners
+ * full-width at the bottom. Desktop (lg, 3 cols) pins each tile to an explicit
+ * cell — a composed 3×3 collage (mono · giant(tall) · trend / custom · giant ·
+ * wedding(tall) / interior · jute · wedding), with the B2B banner spanning all
+ * three columns on a fourth row below.
+ *
+ * ВАЖНО: высоких плиток на мобильном должно быть ЧЁТНОЕ число — при нечётном
+ * в сетке из двух колонок остаётся пустая клетка.
+ *
+ * Котомка на мобильном — баннер во всю ширину В ДВА РЯДА. В один ряд (168px)
+ * при ширине 350px в кадр влезает лишь 86% композиции, и цветы или котомка
+ * неминуемо режутся; обрезать сам файл бесполезно — узкий исходник в широкой
+ * плитке масштабируется крупнее и режется ещё сильнее.
  */
 const layout: Record<string, string> = {
   mono: "lg:col-start-1 lg:row-start-1",
   giant: "row-span-2 lg:col-start-2 lg:row-start-1",
   trend: "lg:col-start-3 lg:row-start-1",
   custom: "lg:col-start-1 lg:row-start-2",
-  jute: "row-span-2 lg:col-start-3 lg:row-start-2",
+  wedding: "row-span-2 lg:col-start-3 lg:row-start-2",
   interior: "lg:col-start-1 lg:row-start-3",
-  wedding: "col-span-2 lg:col-span-1 lg:col-start-2 lg:row-start-3",
+  jute: "col-span-2 row-span-2 lg:col-span-1 lg:row-span-1 lg:col-start-2 lg:row-start-3",
   business: "col-span-2 lg:col-span-3 lg:col-start-1 lg:row-start-4",
 };
 
 export function Categories() {
+  const reduce = useReducedMotion();
+  const [selected, setSelected] = useState<Category | null>(null);
+
+  const close = useCallback(() => setSelected(null), []);
+
   return (
     <section id="catalog" className="relative py-24 md:py-32">
       <div className="mx-auto max-w-[1400px] px-5 md:px-10">
@@ -47,11 +67,39 @@ export function Categories() {
                 key={c.slug}
                 category={c}
                 className={layout[c.slug]}
+                onOpen={setSelected}
+                reduce={reduce}
               />
             ))}
           </div>
         </Reveal>
       </div>
+
+      {/* Подложка гаснет отдельно, чтобы карточка успела сморфиться обратно */}
+      <AnimatePresence>
+        {selected ? (
+          <motion.div
+            key="category-backdrop"
+            onClick={close}
+            className="fixed inset-0 z-[75] bg-black/70 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3, ease: EASE }}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selected ? (
+          <CategoryDetail
+            key={selected.slug}
+            category={selected}
+            onClose={close}
+            reduce={reduce}
+          />
+        ) : null}
+      </AnimatePresence>
     </section>
   );
 }

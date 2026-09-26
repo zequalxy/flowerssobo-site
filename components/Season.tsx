@@ -15,7 +15,7 @@ export function Season() {
           <div className="relative mx-auto aspect-[4/5] w-full max-w-md overflow-hidden rounded-[2rem] border border-line-strong lg:max-w-none">
             <Image
               src="/images/season.jpg"
-              alt="Сезонный букет Flowerssobo: каллы, дельфиниум, эремурус и полевая зелень"
+              alt="Сезонный букет Flowerssobo: дельфиниум, бордовые каллы, коробочки лотоса, гортензия и ягоды вибурнума"
               fill
               sizes="(max-width: 1024px) 90vw, 45vw"
               className="object-cover"
@@ -44,11 +44,10 @@ export function Season() {
               месяц.
             </p>
             <p className="mt-5 max-w-xl text-pretty leading-relaxed text-muted">
-              Сейчас цветут садовые и пионовидные розы, подсолнухи, гладиолусы,
-              каллы, дельфиниум, танацетум, астранция, гортензии, маттиола,
-              эустома и декоративные луки аллиум. Мы работаем с сезоном, поэтому
-              составы постоянно меняются, а многие цветы можно увидеть лишь
-              несколько недель в году.
+              Сейчас цветут хризантемы, подсолнухи, брассика, анемоны,
+              гортензии, георгины, герберы и ранункулюсы. Составы постоянно
+              меняются, а многие цветы можно увидеть лишь несколько недель
+              в году.
             </p>
             <a
               href="#order"

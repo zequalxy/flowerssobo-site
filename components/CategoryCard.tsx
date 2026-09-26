@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { motion } from "framer-motion";
 import { ArrowUpRight } from "@phosphor-icons/react/dist/ssr";
 import type { Category } from "@/lib/catalog";
 import { cn } from "@/lib/utils";
@@ -8,27 +9,28 @@ import { cn } from "@/lib/utils";
 /**
  * Bento tile — full-bleed photo with the label overlaid on a dark scrim at the
  * bottom (blurb reveals on hover, desktop). The grid cell sets the size; the
- * image fills it via object-cover. Clicking pre-fills the order form's category
- * and scrolls to it.
+ * image fills it via object-cover. Тап раскрывает карточку направления
+ * (CategoryDetail) — на телефоне ховера нет, и описание иначе недоступно;
+ * заказ оформляется уже оттуда.
  */
 export function CategoryCard({
   category,
   className,
+  onOpen,
+  reduce,
 }: {
   category: Category;
   className?: string;
+  onOpen: (c: Category) => void;
+  reduce: boolean | null;
 }) {
-  function handleClick() {
-    window.dispatchEvent(
-      new CustomEvent("flowerssobo:prefill", { detail: category.formValue }),
-    );
-    document.getElementById("order")?.scrollIntoView({ behavior: "smooth" });
-  }
-
   return (
-    <button
+    <motion.button
       type="button"
-      onClick={handleClick}
+      onClick={() => onOpen(category)}
+      aria-label={`${category.title} — подробнее`}
+      layoutId={reduce ? undefined : `cat-${category.slug}`}
+      transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
       className={cn(
         "group relative h-full w-full overflow-hidden rounded-2xl border border-line bg-bg-elev text-left transition-transform duration-200 ease-out active:scale-[0.99]",
         className,
@@ -41,7 +43,9 @@ export function CategoryCard({
         sizes={
           category.wide
             ? "(max-width: 1024px) 100vw, 1320px"
-            : "(max-width: 1024px) 50vw, 33vw"
+            : category.wideOnMobile
+              ? "(max-width: 1024px) 100vw, 33vw"
+              : "(max-width: 1024px) 50vw, 33vw"
         }
         style={{ objectPosition: category.objectPosition }}
         className="object-cover transition-transform duration-700 ease-out group-hover:scale-[1.05]"
@@ -64,6 +68,6 @@ export function CategoryCard({
           {category.blurb}
         </p>
       </div>
-    </button>
+    </motion.button>
   );
 }
