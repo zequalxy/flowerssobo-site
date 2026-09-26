@@ -50,3 +50,7 @@ next-env.d.ts
 /IMG_*.jpeg
 /IMG_*.HEIC
 /bubu/
+
+# Исходники юридических документов (docx/rtf от юриста) — на сайте их
+# свёрстанная версия в app/privacy и app/consent
+/legal-src/

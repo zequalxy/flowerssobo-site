@@ -156,6 +156,9 @@ function ReviewsMarquee() {
         {loop.map((r, i) => (
           <figure
             key={i}
+            // Вторая половина — копия для бесшовного круга: скринридер
+            // иначе зачитывал бы каждый отзыв дважды.
+            aria-hidden={i >= reviews.length ? true : undefined}
             className="flex w-[300px] shrink-0 flex-col rounded-2xl border border-line bg-surface p-6 shadow-card sm:w-[360px]"
           >
             <Quotes size={26} weight="fill" className="text-rose/70" />

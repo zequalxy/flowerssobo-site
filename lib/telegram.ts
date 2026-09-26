@@ -2,6 +2,34 @@ import type { PosifloraOrder } from "./posiflora";
 import { contactMethodLabels, type OrderInput } from "./schema";
 import { site } from "./site";
 
+type SendResult = { ok: true } | { ok: false; error: string };
+
+/** Результат отправки одному получателю — с chat_id, чтобы лог назвал виновника. */
+type ChatResult = { ok: true } | { ok: false; error: string; chatId: string };
+
+/**
+ * Режим «только уведомление»: заявка целиком уходит в Posiflora, а в Telegram —
+ * лишь сигнал «пришла новая», без персональных данных клиента.
+ *
+ * ВКЛЮЧАТЬ ТОЛЬКО ТАМ, ГДЕ РАБОТАЕТ ИНТЕГРАЦИЯ С POSIFLORA
+ * (TELEGRAM_NOTIFY_ONLY=1). По умолчанию в Telegram уходит заявка целиком:
+ * иначе сборка без Posiflora молча теряла бы все заказы.
+ */
+function notifyOnly(): boolean {
+  return process.env.TELEGRAM_NOTIFY_ONLY === "1";
+}
+
+function moscowStamp(): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
 /** Escape characters that are special in Telegram HTML parse mode. */
 function esc(value: string): string {
   return value
@@ -17,22 +45,28 @@ function row(label: string, value?: string): string {
 }
 
 /**
- * Уведомление о новом заказе. Основная заявка уходит в Posiflora — здесь
- * менеджер видит её содержимое и номер документа, чтобы сразу найти заказ.
+ * Сигнал без персональных данных — для режима с Posiflora. Номер документа
+ * персональными данными не является, зато по нему менеджер сразу находит
+ * заказ, поэтому его добавляем.
+ */
+export function formatOrderNotification(order?: PosifloraOrder): string {
+  const docNo = order?.docNo ?? order?.id;
+  return [
+    "<b>🌸 Новая заявка с сайта</b>",
+    "",
+    docNo ? `Заказ <b>${esc(docNo)}</b> — детали в Posiflora.` : "Детали — в Posiflora.",
+    `<i>${esc(moscowStamp())} (МСК)</i>`,
+  ].join("\n");
+}
+
+/**
+ * Заявка целиком — режим по умолчанию, когда Posiflora не подключена либо
+ * когда владелец хочет видеть контакты прямо в чате.
  */
 export function formatOrderMessage(
   data: OrderInput,
   order?: PosifloraOrder,
 ): string {
-  const stamp = new Intl.DateTimeFormat("ru-RU", {
-    timeZone: "Europe/Moscow",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date());
-
   const methods = contactMethodLabels(data.contactMethods);
 
   const lines = [
@@ -50,13 +84,11 @@ export function formatOrderMessage(
     // Фиксация факта согласия и версии документов (ч. 3 ст. 9 152-ФЗ):
     // вместе со штампом времени это доказательство, что согласие дано.
     `\n<i>Согласие на обработку ПДн подтверждено на сайте (редакция документов от ${esc(site.privacyRevision)})</i>`,
-    `\n<i>${esc(stamp)} (МСК)</i>`,
+    `\n<i>${esc(moscowStamp())} (МСК)</i>`,
   ];
 
   return lines.filter(Boolean).join("");
 }
-
-type SendResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Раскрывает undici-шную «fetch failed» до реальной причины (ENOTFOUND,
@@ -69,7 +101,10 @@ function describeError(err: unknown): string {
   return `${err.message}${causeText}`;
 }
 
-/** Send the order to Telegram via the Bot API. Token stays server-side. */
+/**
+ * Отправить заявку в Telegram владельца: целиком или, в режиме с Posiflora,
+ * только уведомление (см. notifyOnly). Токен остаётся на сервере.
+ */
 export async function sendOrderToTelegram(
   data: OrderInput,
   order?: PosifloraOrder,
@@ -96,13 +131,15 @@ export async function sendOrderToTelegram(
   }
 
   const chatIds = chatIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  const text = formatOrderMessage(data, order);
+  const text = notifyOnly()
+    ? formatOrderNotification(order)
+    : formatOrderMessage(data, order);
 
   // Ошибки URL/сети могут содержать полный адрес запроса вместе с токеном —
   // вычищаем его из всего, что уходит в логи.
   const redact = (s: string) => s.split(token).join("<TOKEN>");
 
-  const sendOne = async (chatId: string): Promise<SendResult> => {
+  const sendOne = async (chatId: string): Promise<ChatResult> => {
     try {
       const res = await fetch(
         `${apiBase}/bot${token}/sendMessage`,
@@ -120,25 +157,36 @@ export async function sendOrderToTelegram(
       );
       if (!res.ok) {
         const body = await res.text();
-        return { ok: false, error: redact(`Telegram API ${res.status}: ${body}`) };
+        return {
+          ok: false,
+          chatId,
+          error: redact(`Telegram API ${res.status}: ${body}`),
+        };
       }
       return { ok: true };
     } catch (err) {
-      return { ok: false, error: redact(describeError(err)) };
+      return { ok: false, chatId, error: redact(describeError(err)) };
     }
   };
 
   const results = await Promise.all(chatIds.map(sendOne));
-  const failed = results.filter((r): r is { ok: false; error: string } => !r.ok);
+  const failed = results.filter(
+    (r): r is { ok: false; error: string; chatId: string } => !r.ok,
+  );
+  // chat_id в сообщении обязателен: иначе при нескольких получателях
+  // непонятно, какой из них отвалился, и виновника ищут перебором.
+  const describeFailures = () =>
+    failed.map((f) => `${f.chatId}: ${f.error}`).join("; ");
+
   if (failed.length === results.length) {
-    return { ok: false, error: failed.map((f) => f.error).join("; ") };
+    return { ok: false, error: describeFailures() };
   }
-  // Частичный сбой — заявка дошла не всем получателям; без лога владелец
+  // Частичный сбой — уведомление дошло не всем получателям; без лога владелец
   // «отвалившегося» чата никогда об этом не узнает.
   if (failed.length > 0) {
     console.error(
       `Telegram partial fail (${failed.length}/${results.length}):`,
-      failed.map((f) => f.error).join("; "),
+      describeFailures(),
     );
   }
   return { ok: true };
