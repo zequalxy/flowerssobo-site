@@ -27,6 +27,11 @@ RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+# Бинарники sharp/libvips кладём явно. Трассировщик Next подбирает их по
+# особому правилу, но если оно не сработает (на Windows так и есть), sharp
+# не загрузится — и оптимизатор картинок МОЛЧА отдаёт оригиналы вместо
+# AVIF/WebP: в 5–7 раз тяжелее, без единой ошибки в логах.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@img ./node_modules/@img
 
 USER nextjs
 EXPOSE 3000
