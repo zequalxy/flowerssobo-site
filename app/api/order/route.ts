@@ -1,7 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createPosifloraOrder, readPosifloraConfig } from "@/lib/posiflora";
 import { orderSchema } from "@/lib/schema";
-import { isTelegramNotifyOnly, sendOrderToTelegram } from "@/lib/telegram";
+import {
+  createStebelOrder,
+  readStebelConfig,
+  stebelConfigProblem,
+  stebelOrderUrl,
+  type StebelOrder,
+  type StebelOutcome,
+} from "@/lib/stebel";
+import {
+  isTelegramNotifyOnly,
+  sendOrderToTelegram,
+  type StoredOrder,
+} from "@/lib/telegram";
 
 export const runtime = "nodejs";
 
@@ -54,6 +67,38 @@ async function readBodyCapped(req: Request, limit: number): Promise<string | nul
     chunks.push(value);
   }
   return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/** Номер заказа в Стебле для Telegram: «№ 17», а без номера — его id. */
+function stebelRef(order: StebelOrder): StoredOrder {
+  return {
+    system: "stebel",
+    ref: order.number !== null ? `№ ${order.number}` : order.id,
+    link: stebelOrderUrl(order) ?? undefined,
+  };
+}
+
+/**
+ * Сколько Telegram ждёт Стебель, чтобы положить в сообщение ссылку на заказ.
+ * Обычно Стебель отвечает за доли секунды; если дольше — уведомление уходит
+ * без ссылки, а не задерживает ответ покупателю.
+ */
+const STEBEL_LINK_WAIT_MS = 2_000;
+
+/** Результат Стебля, если он успел за ms; иначе null. Сам запрос не обрывается. */
+async function within(
+  pending: Promise<StebelOutcome>,
+  ms: number,
+): Promise<StebelOutcome | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function POST(req: Request) {
@@ -116,42 +161,107 @@ export async function POST(req: Request) {
       { status: 502 },
     );
 
+  const success = () => NextResponse.json({ ok: true });
+
   // Комбинация, в которой заявку некуда положить: Telegram получает сигнал
-  // без персональных данных, потому что детали «лежат в Posiflora», а
-  // Posiflora не настроена. Раньше это молча теряло заявку: клиент видел
-  // успех, владелец — содержательно пустое уведомление, заказа не было
-  // нигде. Отказываемся до отправки: слать бессмысленный сигнал незачем, а
-  // подменять его полной заявкой нельзя — владелец сознательно отключил
-  // передачу персональных данных в Telegram, и согласие на сайте может
-  // такой передачи не предусматривать.
-  if (isTelegramNotifyOnly() && !readPosifloraConfig()) {
+  // без персональных данных, потому что детали «лежат в Posiflora или
+  // Стебле», а ни то, ни другое не настроено. Раньше это молча теряло
+  // заявку: клиент видел успех, владелец — содержательно пустое
+  // уведомление, заказа не было нигде. Отказываемся до отправки: слать
+  // бессмысленный сигнал незачем, а подменять его полной заявкой нельзя —
+  // владелец сознательно отключил передачу персональных данных в Telegram,
+  // и согласие на сайте может такой передачи не предусматривать.
+  if (isTelegramNotifyOnly() && !readPosifloraConfig() && !readStebelConfig()) {
+    const stebelProblem = stebelConfigProblem();
     console.error(
-      "TELEGRAM_NOTIFY_ONLY=1, но Posiflora не настроена: заявку некуда " +
-        "сохранить. Задайте POSIFLORA_API_URL, POSIFLORA_USERNAME, " +
-        "POSIFLORA_PASSWORD и POSIFLORA_STORE_ID — либо снимите " +
-        "TELEGRAM_NOTIFY_ONLY, чтобы заявка уходила в Telegram целиком.",
+      "TELEGRAM_NOTIFY_ONLY=1, но ни Posiflora, ни Стебель не настроены: " +
+        "заявку некуда сохранить. Задайте POSIFLORA_API_URL, " +
+        "POSIFLORA_USERNAME, POSIFLORA_PASSWORD и POSIFLORA_STORE_ID или " +
+        "STEBEL_API_URL и STEBEL_SITE_KEY — либо снимите " +
+        "TELEGRAM_NOTIFY_ONLY, чтобы заявка уходила в Telegram целиком." +
+        (stebelProblem ? ` Стебель: ${stebelProblem}` : ""),
     );
     return failure();
   }
 
-  // Posiflora — основной адресат: пока заказ не заведён, заявки нет.
+  // Posiflora — основной адресат: пока заказ не заведён, заявки нет. При
+  // сбое Стебель не зовём: клиент увидит ошибку и повторит заявку, а копия
+  // в Стебле осталась бы заказом-призраком и потом задвоилась бы.
   const posiflora = await createPosifloraOrder(parsed.data);
   if (posiflora.status === "failed") {
     console.error("Posiflora order failed:", posiflora.error);
     return failure();
   }
 
-  const order = posiflora.status === "created" ? posiflora.order : undefined;
-
-  // Telegram — уведомление о заказе. Заказ уже в Posiflora, поэтому сбой
-  // рассылки не должен выглядеть для клиента как потерянная заявка: логируем
-  // и отвечаем успехом. Исключение — когда Posiflora не настроена: тогда
-  // Telegram остаётся единственным адресатом и его сбой означает потерю заявки.
-  const notified = await sendOrderToTelegram(parsed.data, order);
-  if (!notified.ok) {
-    console.error("Telegram notification failed:", notified.error);
-    if (posiflora.status === "disabled") return failure();
+  if (posiflora.status === "created") {
+    const { order } = posiflora;
+    const docNo = order.docNo ?? order.id;
+    // Заказ уже в Posiflora. Telegram — уведомление, Стебель — копия для CRM
+    // магазина; сбой любого из них клиенту не виден: заказ на месте, сбой
+    // уходит в лог. Оба запроса идут почти параллельно: Telegram ждёт Стебель
+    // не дольше STEBEL_LINK_WAIT_MS — последовательно они могли бы не
+    // уложиться в 15 секунд, которые форма ждёт ответа сервера. id
+    // заказа Posiflora — ключ идемпотентности для Стебля: повтор запроса не
+    // создаст там второй заказ.
+    const pending = createStebelOrder(parsed.data, {
+      requestId: order.id,
+      externalRef: `Посифлора ${docNo}`,
+    });
+    // Telegram ждёт Стебель недолго: успел — в сообщении ссылка на заказ в
+    // Стебле (без персональных данных), нет — сообщение уходит без неё.
+    const early = await within(pending, STEBEL_LINK_WAIT_MS);
+    const link =
+      early?.status === "created" ? stebelOrderUrl(early.order) : null;
+    const [notified, stebel] = await Promise.all([
+      sendOrderToTelegram(parsed.data, {
+        system: "posiflora",
+        ref: docNo,
+        link: link ?? undefined,
+      }),
+      pending,
+    ]);
+    if (!notified.ok) {
+      console.error("Telegram notification failed:", notified.error);
+    }
+    if (stebel.status === "failed") {
+      console.error("Stebel order failed:", stebel.error);
+    }
+    return success();
   }
 
-  return NextResponse.json({ ok: true });
+  // Posiflora не настроена — хранилищем становится Стебель, если он
+  // подключён. Его зовём первым: номер заказа нужен для Telegram. Если
+  // Стебель не подключён (status «disabled»), запрос к нему не уходит, и всё
+  // как раньше: Telegram — единственный адресат.
+  const stebel = await createStebelOrder(parsed.data, {
+    requestId: randomUUID(),
+  });
+  if (stebel.status === "failed") {
+    console.error("Stebel order failed:", stebel.error);
+  }
+  const stored =
+    stebel.status === "created" ? stebelRef(stebel.order) : undefined;
+
+  if (isTelegramNotifyOnly()) {
+    // Заявка целиком есть только в Стебле (проверка выше гарантирует, что
+    // он настроен). Не создан — заявки нет: сигнал «детали в Стебле» был бы
+    // пустым, поэтому клиенту — ошибка. Создан — сбой сигнала только в лог.
+    if (!stored) return failure();
+    const notified = await sendOrderToTelegram(parsed.data, stored);
+    if (!notified.ok) {
+      console.error("Telegram notification failed:", notified.error);
+    }
+    return success();
+  }
+
+  // Заявка целиком уходит в Telegram — с номером заказа в Стебле, если он
+  // создан. Принимаем, если заявка дошла хотя бы до одного из двух: ложный
+  // отказ живому покупателю дороже, а заявка уже у магазина. Ошибка —
+  // только когда она не дошла никуда.
+  const notified = await sendOrderToTelegram(parsed.data, stored);
+  if (!notified.ok) {
+    console.error("Telegram notification failed:", notified.error);
+    if (!stored) return failure();
+  }
+  return success();
 }
