@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { createPosifloraOrder, readPosifloraConfig } from "@/lib/posiflora";
 import { orderSchema } from "@/lib/schema";
 import {
@@ -8,7 +8,6 @@ import {
   stebelConfigProblem,
   stebelOrderUrl,
   type StebelOrder,
-  type StebelOutcome,
 } from "@/lib/stebel";
 import {
   isTelegramNotifyOnly,
@@ -85,11 +84,17 @@ function stebelRef(order: StebelOrder): StoredOrder {
  */
 const STEBEL_LINK_WAIT_MS = 2_000;
 
-/** Результат Стебля, если он успел за ms; иначе null. Сам запрос не обрывается. */
-async function within(
-  pending: Promise<StebelOutcome>,
-  ms: number,
-): Promise<StebelOutcome | null> {
+/**
+ * Когда заявка уже в Стебле, сигнал в Telegram на ответ покупателю не влияет.
+ * Дольше этого (от начала запроса к Стеблю) ответ его не ждёт: Стебель с
+ * повтором — до 10 с, Telegram — ещё до 10 с, а форма сдаётся через 15 с и
+ * показывает ошибку. Покупатель повторил бы заявку, и в Стебле вышел бы
+ * второй заказ. Не успевший сигнал досылается после ответа.
+ */
+const REPLY_DEADLINE_MS = 12_000;
+
+/** Результат, если он успел за ms; иначе null. Сам запрос не обрывается. */
+async function within<T>(pending: Promise<T>, ms: number): Promise<T | null> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), ms);
@@ -230,38 +235,58 @@ export async function POST(req: Request) {
   }
 
   // Posiflora не настроена — хранилищем становится Стебель, если он
-  // подключён. Его зовём первым: номер заказа нужен для Telegram. Если
-  // Стебель не подключён (status «disabled»), запрос к нему не уходит, и всё
-  // как раньше: Telegram — единственный адресат.
-  const stebel = await createStebelOrder(parsed.data, {
-    requestId: randomUUID(),
-  });
-  if (stebel.status === "failed") {
-    console.error("Stebel order failed:", stebel.error);
-  }
-  const stored =
-    stebel.status === "created" ? stebelRef(stebel.order) : undefined;
+  // подключён. Если Стебель не подключён (status «disabled»), запрос к нему
+  // не уходит, и всё как раньше: Telegram — единственный адресат.
+  const startedAt = Date.now();
+  const pending = createStebelOrder(parsed.data, { requestId: randomUUID() });
 
   if (isTelegramNotifyOnly()) {
     // Заявка целиком есть только в Стебле (проверка выше гарантирует, что
     // он настроен). Не создан — заявки нет: сигнал «детали в Стебле» был бы
     // пустым, поэтому клиенту — ошибка. Создан — сбой сигнала только в лог.
-    if (!stored) return failure();
-    const notified = await sendOrderToTelegram(parsed.data, stored);
-    if (!notified.ok) {
-      console.error("Telegram notification failed:", notified.error);
+    const stebel = await pending;
+    if (stebel.status === "failed") {
+      console.error("Stebel order failed:", stebel.error);
     }
+    if (stebel.status !== "created") return failure();
+    const notifying = sendOrderToTelegram(
+      parsed.data,
+      stebelRef(stebel.order),
+    ).then((notified) => {
+      if (!notified.ok) {
+        console.error("Telegram notification failed:", notified.error);
+      }
+    });
+    // Заказ уже в Стебле: сигнал ждём, только пока форма ещё ждёт ответа,
+    // а не успевший — досылаем после ответа (REPLY_DEADLINE_MS).
+    after(() => notifying);
+    await within(
+      notifying,
+      Math.max(0, REPLY_DEADLINE_MS - (Date.now() - startedAt)),
+    );
     return success();
   }
 
   // Заявка целиком уходит в Telegram — с номером заказа в Стебле, если он
-  // создан. Принимаем, если заявка дошла хотя бы до одного из двух: ложный
-  // отказ живому покупателю дороже, а заявка уже у магазина. Ошибка —
-  // только когда она не дошла никуда.
-  const notified = await sendOrderToTelegram(parsed.data, stored);
+  // успел за STEBEL_LINK_WAIT_MS. Ждать Стебель дольше нельзя: его до 10 с
+  // и затем Telegram до 10 с не уложились бы в 15 с формы. Принимаем, если
+  // заявка дошла хотя бы до одного из двух: ложный отказ живому покупателю
+  // дороже, а заявка уже у магазина. Ошибка — только когда она не дошла
+  // никуда.
+  const early = await within(pending, STEBEL_LINK_WAIT_MS);
+  const [notified, stebel] = await Promise.all([
+    sendOrderToTelegram(
+      parsed.data,
+      early?.status === "created" ? stebelRef(early.order) : undefined,
+    ),
+    pending,
+  ]);
+  if (stebel.status === "failed") {
+    console.error("Stebel order failed:", stebel.error);
+  }
   if (!notified.ok) {
     console.error("Telegram notification failed:", notified.error);
-    if (!stored) return failure();
+    if (stebel.status !== "created") return failure();
   }
   return success();
 }

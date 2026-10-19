@@ -320,11 +320,13 @@ function describeFailure(status: number, body: string): Failure {
 /**
  * Адрес заказа в приложении Стебля — для ссылки в уведомлении. Приложение
  * живёт на том же адресе, что и API, без /api на конце. Не похоже на
- * адрес API — ссылки нет: лучше без неё, чем с битой.
+ * адрес API — ссылки нет: лучше без неё, чем с битой. По http (это только
+ * localhost) ссылки тоже нет: с телефона она не откроется, а Telegram может
+ * отклонить такое сообщение целиком — и уведомление пропадёт.
  */
 export function stebelOrderUrl(order: StebelOrder): string | null {
   const cfg = readStebelConfig();
-  if (!cfg || !/\/api$/.test(cfg.baseUrl)) return null;
+  if (!cfg || !/^https:\/\/.+\/api$/.test(cfg.baseUrl)) return null;
   return `${cfg.baseUrl.replace(/\/api$/, "")}/orders/${encodeURIComponent(order.id)}`;
 }
 
@@ -456,7 +458,11 @@ async function attempt(
     };
   }
 
-  if (!res.ok) return { ok: false, ...describeFailure(res.status, text) };
+  // Ключ вычищаем до того, как describeFailure обрежет тело до 300 знаков:
+  // после обрезки на границе остался бы кусок ключа, который redact уже не узнает.
+  if (!res.ok) {
+    return { ok: false, ...describeFailure(res.status, redact(text, cfg)) };
+  }
 
   const order = parseOrder(text);
   if (!order) {
