@@ -72,9 +72,20 @@ const raw: RawProduct[] = [
     description:
       "Классический моно из красных роз: плотная сборка и насыщенный цвет. Подходит к любому поводу и просто без повода.",
     flowers: ["Красная роза"],
-    stems: { perStem: 260, options: [9, 15, 19, 25, 51, 101], photoCount: 25 },
+    // 101 шт здесь нет: это отдельная позиция ниже по своей цене.
+    stems: { perStem: 260, options: [9, 15, 19, 25, 51], photoCount: 25 },
     formCategory: "Монобукет",
     image: "/images/detail/krasnaya-roza.jpg",
+  },
+  {
+    slug: "roza-101-krasnaya",
+    name: "101 роза",
+    description:
+      "Монобукет из 101 красной розы — объём, который видно с порога. Плотная сборка и глубокий красный цвет.",
+    flowers: ["Красная роза"],
+    price: 19990,
+    formCategory: "Монобукет",
+    image: "/images/detail/roza-101-krasnaya.jpg",
   },
   {
     slug: "gortenziya-sad-roza",

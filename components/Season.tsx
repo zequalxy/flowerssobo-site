@@ -1,6 +1,6 @@
-import Image from "next/image";
 import { ArrowRight } from "@phosphor-icons/react/dist/ssr";
 import { Reveal } from "@/components/ui/Reveal";
+import { SeasonVideo } from "@/components/SeasonVideo";
 
 /**
  * Seasonality is the brand's core promise — this block sits first, above the
@@ -10,15 +10,13 @@ export function Season() {
   return (
     <section id="season" className="relative scroll-mt-24 py-24 md:py-32">
       <div className="mx-auto grid max-w-[1400px] grid-cols-1 items-center gap-12 px-5 md:px-10 lg:grid-cols-2 lg:gap-20">
-        {/* Image */}
+        {/* Video — витрина-холодильник студии; 4:5 кадрирует вертикальный ролик по центру */}
         <Reveal className="order-1">
           <div className="relative mx-auto aspect-[4/5] w-full max-w-md overflow-hidden rounded-[2rem] border border-line-strong lg:max-w-none">
-            <Image
-              src="/images/season.jpg"
-              alt="Сезонный букет Flowerssobo: дельфиниум, бордовые каллы, коробочки лотоса, гортензия и ягоды вибурнума"
-              fill
-              sizes="(max-width: 1024px) 90vw, 45vw"
-              className="object-cover"
+            <SeasonVideo
+              src="/video/season.mp4"
+              poster="/video/season-poster.jpg"
+              label="Витрина Flowerssobo с сезонными цветами"
             />
             <div className="absolute left-4 top-4 flex items-center gap-2.5 rounded-full border border-white/15 bg-black/35 px-4 py-2.5 backdrop-blur-md">
               <span className="relative flex size-2">
@@ -40,14 +38,18 @@ export function Season() {
               То, что цветёт сейчас
             </h2>
             <p className="mt-6 max-w-xl text-balance text-lg font-medium leading-snug text-ink md:text-xl">
-              Мы работаем с сезоном. Букеты, которые не получится повторить через
-              месяц.
+              Подборка недели
             </p>
             <p className="mt-5 max-w-xl text-pretty leading-relaxed text-muted">
-              Сейчас цветут хризантемы, подсолнухи, брассика, анемоны,
-              гортензии, георгины, герберы и ранункулюсы. Составы постоянно
-              меняются, а многие цветы можно увидеть лишь несколько недель
-              в году.
+              Мы работаем с сезоном, поэтому наша витрина постоянно меняется.
+              Сейчас в ней хризантемы, подсолнухи, брассика, гортензии,
+              ранункулюсы, амариллисы и ветки илекса.
+            </p>
+            <p className="mt-4 max-w-xl text-pretty leading-relaxed text-muted">
+              Одни цветы остаются с нами всего несколько недель, другие
+              появляются на витрине с наступлением своего сезона. Поэтому её
+              состав меняется почти каждую неделю, а сезонные букеты редко
+              получается повторить точь-в-точь.
             </p>
             <a
               href="#order"
