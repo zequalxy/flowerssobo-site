@@ -1,4 +1,3 @@
-import type { PosifloraOrder } from "./posiflora";
 import { contactMethodLabels, type OrderInput } from "./schema";
 import { site } from "./site";
 
@@ -8,12 +7,31 @@ type SendResult = { ok: true } | { ok: false; error: string };
 type ChatResult = { ok: true } | { ok: false; error: string; chatId: string };
 
 /**
- * Режим «только уведомление»: заявка целиком уходит в Posiflora, а в Telegram —
- * лишь сигнал «пришла новая», без персональных данных клиента.
+ * Где заявка хранится и как её там найти: Posiflora и номер документа
+ * («site53da7243») или Стебель и номер заказа («№ 17»). link — ссылка на
+ * этот же заказ в Стебле, если он там есть: по ней менеджер открывает
+ * заказ с телефона, а персональных данных в ссылке нет — детали видны
+ * только после входа в Стебель.
+ */
+export type StoredOrder = {
+  system: "posiflora" | "stebel";
+  ref: string;
+  link?: string;
+};
+
+/** Как система называется в тексте: заголовок и «детали где». */
+const SYSTEMS = {
+  posiflora: { header: "НОВЫЙ ЗАКАЗ В POSIFLORA", where: "в Posiflora" },
+  stebel: { header: "НОВЫЙ ЗАКАЗ В СТЕБЛЕ", where: "в Стебле" },
+} as const;
+
+/**
+ * Режим «только уведомление»: заявка целиком уходит в Posiflora или Стебель,
+ * а в Telegram — лишь сигнал «пришла новая», без персональных данных клиента.
  *
- * ВКЛЮЧАТЬ ТОЛЬКО ТАМ, ГДЕ РАБОТАЕТ ИНТЕГРАЦИЯ С POSIFLORA
+ * ВКЛЮЧАТЬ ТОЛЬКО ТАМ, ГДЕ РАБОТАЕТ ИНТЕГРАЦИЯ С POSIFLORA ИЛИ СО СТЕБЛЕМ
  * (TELEGRAM_NOTIFY_ONLY=1). По умолчанию в Telegram уходит заявка целиком:
- * иначе сборка без Posiflora молча теряла бы все заказы.
+ * иначе сборка без хранилища заявок молча теряла бы все заказы.
  */
 export function isTelegramNotifyOnly(): boolean {
   return process.env.TELEGRAM_NOTIFY_ONLY === "1";
@@ -38,6 +56,13 @@ function esc(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/** Ссылка в Telegram HTML: адрес — в кавычках атрибута, их тоже экранируем. */
+function link(order?: StoredOrder): string {
+  if (!order?.link) return "";
+  const href = esc(order.link).replace(/"/g, "&quot;");
+  return `<a href="${href}">Открыть в Стебле</a>`;
+}
+
 function row(label: string, value?: string): string {
   const v = (value ?? "").trim();
   if (!v) return "";
@@ -45,36 +70,41 @@ function row(label: string, value?: string): string {
 }
 
 /**
- * Сигнал без персональных данных — для режима с Posiflora. Номер документа
- * персональными данными не является, зато по нему менеджер сразу находит
- * заказ, поэтому его добавляем.
+ * Сигнал без персональных данных — для режима с Posiflora или Стеблем.
+ * Номер заказа персональными данными не является, зато по нему менеджер
+ * сразу находит заказ, поэтому его добавляем.
  */
-export function formatOrderNotification(order?: PosifloraOrder): string {
-  const docNo = order?.docNo ?? order?.id;
+export function formatOrderNotification(order?: StoredOrder): string {
   return [
     "<b>🌸 Новая заявка с сайта</b>",
     "",
-    docNo ? `Заказ <b>${esc(docNo)}</b> — детали в Posiflora.` : "Детали — в Posiflora.",
+    order
+      ? `Заказ <b>${esc(order.ref)}</b> — детали ${SYSTEMS[order.system].where}.`
+      : "Детали — в системе заказов магазина.",
+    link(order),
     `<i>${esc(moscowStamp())} (МСК)</i>`,
-  ].join("\n");
+  ]
+    .filter((line, i) => i === 1 || line)
+    .join("\n");
 }
 
 /**
- * Заявка целиком — режим по умолчанию, когда Posiflora не подключена либо
- * когда владелец хочет видеть контакты прямо в чате.
+ * Заявка целиком — режим по умолчанию, когда хранилище заявок не подключено
+ * либо когда владелец хочет видеть контакты прямо в чате.
  */
 export function formatOrderMessage(
   data: OrderInput,
-  order?: PosifloraOrder,
+  order?: StoredOrder,
 ): string {
   const methods = contactMethodLabels(data.contactMethods);
 
   const lines = [
     order
-      ? "<b>НОВЫЙ ЗАКАЗ В POSIFLORA</b>\n"
+      ? `<b>${SYSTEMS[order.system].header}</b>\n`
       : "<b>НОВАЯ ЗАЯВКА С САЙТА</b>\n",
-    // Номер документа — то, по чему заказ ищется в интерфейсе Posiflora.
-    order ? row("Заказ", order.docNo ?? order.id) : "",
+    // Номер — то, по чему заказ ищется в интерфейсе Posiflora или Стебля.
+    order ? row("Заказ", order.ref) : "",
+    order?.link ? `${link(order)}\n` : "",
     row("ФИО", data.fullName),
     row("Телефон", data.phone),
     row("Telegram", data.telegramNick),
@@ -102,12 +132,13 @@ function describeError(err: unknown): string {
 }
 
 /**
- * Отправить заявку в Telegram владельца: целиком или, в режиме с Posiflora,
- * только уведомление (см. notifyOnly). Токен остаётся на сервере.
+ * Отправить заявку в Telegram владельца: целиком или, когда она хранится в
+ * Posiflora или Стебле, только уведомление (см. isTelegramNotifyOnly).
+ * Токен остаётся на сервере.
  */
 export async function sendOrderToTelegram(
   data: OrderInput,
-  order?: PosifloraOrder,
+  order?: StoredOrder,
 ): Promise<SendResult> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatIdsRaw = process.env.TELEGRAM_CHAT_ID;
