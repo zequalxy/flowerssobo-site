@@ -401,12 +401,12 @@ export function OrderForm() {
         <div id="order" className="scroll-mt-24 lg:col-span-7">
           <p className="eyebrow">Заявка</p>
           <h2 className="mt-4 text-balance text-4xl tracking-tight md:text-5xl">
-            Персональный подбор цветов
+            {storefront.cart.length || pendingRequest ? "Оформим ваш выбор" : "Персональный подбор цветов"}
           </h2>
           <p className="mt-6 max-w-xl text-pretty leading-relaxed text-muted">
-            Расскажите о своих пожеланиях, и мы подберём букет или вазу из
-            сезонных цветов, идеально подходящих для вас. Свяжитесь с менеджером —
-            поможем с выбором.
+            {storefront.cart.length || pendingRequest
+              ? "Оставьте контакты и пожелания. Флорист подтвердит состав, оформление и стоимость доставки. Цветы закрепим за вами после подтверждения."
+              : "Расскажите о своих пожеланиях, и мы подберём букет или вазу из сезонных цветов, идеально подходящих для вас. Свяжитесь с менеджером — поможем с выбором."}
           </p>
 
           <div className="mt-8 rounded-[1.75rem] border border-line bg-bg-elev/70 p-6 shadow-card md:p-9">

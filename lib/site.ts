@@ -34,9 +34,9 @@ export const site = {
 } as const;
 
 export const navLinks = [
-  { href: "#catalog", label: "Каталог" },
-  { href: "#bouquets", label: "Витрина" },
+  { href: "/#bouquets", label: "Готовые букеты" },
+  { href: "/flowers", label: "Собрать букет" },
   // Условия доставки (часы, стоимость, бесплатная от 10 000 ₽) — в «Вопросах».
-  { href: "#faq", label: "Доставка" },
-  { href: "#contacts", label: "Контакты" },
+  { href: "/#faq", label: "Доставка" },
+  { href: "/#contacts", label: "Контакты" },
 ] as const;

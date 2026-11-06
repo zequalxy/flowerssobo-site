@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   TelegramLogo,
   WhatsappLogo,
@@ -26,7 +27,9 @@ export function Footer() {
       <div className="mx-auto max-w-[1400px] px-5 py-14 md:px-10">
         <div className="flex flex-col gap-10 md:flex-row md:items-start md:justify-between">
           <div className="max-w-xs">
-            <Logo className="text-2xl text-rose" />
+            <Link href="/#top" aria-label="Flowerssobo — на главную">
+              <Logo className="text-2xl text-rose" />
+            </Link>
             <p className="mt-3 text-sm leading-relaxed text-muted">
               Авторская флористика и доставка цветов по Липецку за 60–90 минут.
             </p>
@@ -34,13 +37,13 @@ export function Footer() {
 
           <nav className="flex flex-col gap-3">
             {navLinks.map((l) => (
-              <a
+              <Link
                 key={l.href}
                 href={l.href}
                 className="text-sm text-muted transition-colors hover:text-ink"
               >
                 {l.label}
-              </a>
+              </Link>
             ))}
           </nav>
 
@@ -76,12 +79,12 @@ export function Footer() {
             © {new Date().getFullYear()} Flowerssobo · {site.legal.entity}
           </p>
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-5">
-            <a href="/privacy" className="transition-colors hover:text-ink">
+            <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-ink">
               Положение о конфиденциальности
-            </a>
-            <a href="/consent" className="transition-colors hover:text-ink">
+            </Link>
+            <Link href="/consent" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-ink">
               Согласие на обработку ПДн
-            </a>
+            </Link>
             <p>
               ИНН {site.legal.inn} · ОГРНИП {site.legal.ogrnip}
             </p>

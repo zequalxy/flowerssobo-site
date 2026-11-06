@@ -2,6 +2,7 @@
 
 import { ArrowRight, Minus, Plus, Trash, ShoppingBag } from "@phosphor-icons/react/dist/ssr";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useStorefront } from "./StorefrontProvider";
 import { formatKopecks, MAX_ITEM_QUANTITY, type StorefrontItem } from "@/lib/storefront";
 
@@ -21,7 +22,12 @@ export function QuantityControl({ item, compact = false }: { item: StorefrontIte
 }
 
 export function StorefrontCart({ sticky = false }: { sticky?: boolean }) {
-  const { cart, catalog, total, count, cartError, checkoutPending, setQuantity, clear, refresh } = useStorefront();
+  const { cart, catalog, total, cartError, checkoutPending, setQuantity, clear, refresh } = useStorefront();
+  const onlyCustomBouquet = cart.some((line) => catalog?.items.find((item) => item.id === line.id)?.kind === "flower") &&
+    cart.every((line) => {
+      const kind = catalog?.items.find((item) => item.id === line.id)?.kind;
+      return kind === "flower" || kind === "packaging";
+    });
   const [atForm, setAtForm] = useState(false);
   useEffect(() => {
     if (!sticky || !window.IntersectionObserver) return;
@@ -36,7 +42,7 @@ export function StorefrontCart({ sticky = false }: { sticky?: boolean }) {
   if (sticky) return (
     <div className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md pb-[env(safe-area-inset-bottom)] md:bottom-6">
       <a href="#order" className="flex items-center justify-between gap-4 rounded-full border border-rose/40 bg-rose px-5 py-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] transition-colors hover:bg-rose-deep">
-        <span className="flex items-center gap-2 text-sm font-semibold"><ShoppingBag size={21} />{checkoutPending ? "Проверить отправку заявки" : `Мой выбор · ${count}`}</span>
+        <span className="flex items-center gap-2 text-sm font-semibold"><ShoppingBag size={21} />{checkoutPending ? "Проверить отправку заявки" : onlyCustomBouquet ? "Мой букет" : "Мой выбор"}</span>
         <span className="flex items-center gap-2 text-sm font-semibold tabular-nums">{checkoutPending ? null : formatKopecks(total)}<ArrowRight size={18} /></span>
       </a>
     </div>
@@ -68,7 +74,10 @@ export function StorefrontCart({ sticky = false }: { sticky?: boolean }) {
       <div className="mt-4 flex items-center justify-between border-t border-line pt-4 font-semibold"><span>Стоимость выбранного</span><span className="tabular-nums">{formatKopecks(total)}</span></div>
       <p className="mt-2 text-xs leading-relaxed text-muted">Доставку и пожелания к оформлению согласуем отдельно. Флорист подтвердит наличие и закрепит цветы за вами.</p>
       {cartError && !checkoutPending ? <div role="status" className="mt-3 text-sm text-rose">{cartError} <button type="button" onClick={() => void refresh()} className="underline underline-offset-4">Обновить наличие</button></div> : null}
-      <a href="#bouquets" className="mt-4 inline-block text-sm text-muted underline underline-offset-4 hover:text-rose">Продолжить выбирать</a>
+      <div className="mt-4 flex flex-wrap gap-x-5 gap-y-3 text-sm text-muted">
+        <Link href="/#bouquets" className="underline underline-offset-4 hover:text-rose">Добавить готовый букет</Link>
+        <Link href="/flowers#flowers" className="underline underline-offset-4 hover:text-rose">Выбрать ещё цветы</Link>
+      </div>
     </div>
   );
 }

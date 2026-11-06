@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   AnimatePresence,
   motion,
@@ -15,9 +17,11 @@ import { cn } from "@/lib/utils";
 const DRAWER_EASE: [number, number, number, number] = [0.32, 0.72, 0, 1];
 
 export function Nav() {
+  const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
   const { scrollY } = useScroll();
+  const solid = pathname !== "/" || scrolled;
 
   useMotionValueEvent(scrollY, "change", (v) => {
     setScrolled(v > 28);
@@ -28,7 +32,7 @@ export function Nav() {
   useEffect(() => {
     const id = requestAnimationFrame(() => setScrolled(window.scrollY > 28));
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [pathname]);
 
   // Открытое меню: фон не должен прокручиваться, Escape закрывает.
   useEffect(() => {
@@ -50,57 +54,58 @@ export function Nav() {
       <header
         className={cn(
           "fixed inset-x-0 top-0 z-50 transition-colors duration-300",
-          scrolled
+          solid
             ? "border-b border-line bg-bg/80 backdrop-blur-xl"
             : "border-b border-transparent bg-transparent",
         )}
       >
         <nav className="mx-auto flex h-16 max-w-[1400px] items-center justify-between px-5 md:h-20 md:px-10">
-          <a href="#top" aria-label="Flowerssobo — наверх">
+          <Link href="/#top" aria-label="Flowerssobo — на главную">
             <Logo
               className={cn(
                 "text-xl transition-colors duration-300 md:text-2xl",
-                scrolled ? "text-rose" : "text-white",
+                solid ? "text-rose" : "text-white",
               )}
             />
-          </a>
+          </Link>
 
-          <ul className="hidden items-center gap-9 lg:flex">
+          <ul className="hidden items-center gap-6 xl:flex">
             {navLinks.map((link) => (
               <li key={link.href}>
-                <a
+                <Link
                   href={link.href}
+                  aria-current={link.href === pathname ? "page" : undefined}
                   className={cn(
                     "text-sm transition-colors duration-200",
-                    scrolled
+                    solid
                       ? "text-muted hover:text-ink"
                       : "text-white/80 hover:text-white",
                   )}
                 >
                   {link.label}
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
 
-          <div className="hidden items-center gap-5 lg:flex">
+          <div className="hidden items-center gap-5 xl:flex">
             <a
               href={site.phoneHref}
               className={cn(
                 "text-sm font-medium transition-colors duration-200",
-                scrolled
+                solid
                   ? "text-ink/90 hover:text-rose"
                   : "text-white/90 hover:text-white",
               )}
             >
               {site.phoneDisplay}
             </a>
-            <a
+            <Link
               href="#order"
               className="rounded-full bg-rose px-5 py-2.5 text-sm font-semibold text-white transition-colors duration-200 hover:bg-rose-deep active:scale-[0.97]"
             >
               Оставить заявку
-            </a>
+            </Link>
           </div>
 
           <button
@@ -108,8 +113,8 @@ export function Nav() {
             aria-label="Открыть меню"
             onClick={() => setOpen(true)}
             className={cn(
-              "flex size-11 items-center justify-center rounded-full border transition-colors lg:hidden",
-              scrolled
+              "flex size-11 items-center justify-center rounded-full border transition-colors xl:hidden",
+              solid
                 ? "border-line text-ink hover:bg-surface-hover"
                 : "border-white/30 text-white hover:bg-white/10",
             )}
@@ -125,7 +130,7 @@ export function Nav() {
             role="dialog"
             aria-modal="true"
             aria-label="Меню"
-            className="fixed inset-0 z-[60] flex flex-col bg-bg/95 backdrop-blur-2xl lg:hidden"
+            className="fixed inset-0 z-[60] flex flex-col bg-bg/95 backdrop-blur-2xl xl:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -145,10 +150,8 @@ export function Nav() {
 
             <nav className="flex flex-1 flex-col justify-center gap-2 px-6">
               {navLinks.map((link, i) => (
-                <motion.a
+                <motion.div
                   key={link.href}
-                  href={link.href}
-                  onClick={() => setOpen(false)}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{
@@ -156,10 +159,16 @@ export function Nav() {
                     duration: 0.4,
                     ease: DRAWER_EASE,
                   }}
-                  className="border-b border-line py-4 font-display text-3xl font-bold tracking-tight text-ink"
                 >
-                  {link.label}
-                </motion.a>
+                  <Link
+                    href={link.href}
+                    onClick={() => setOpen(false)}
+                    aria-current={link.href === pathname ? "page" : undefined}
+                    className="block border-b border-line py-4 font-display text-3xl font-bold tracking-tight text-ink"
+                  >
+                    {link.label}
+                  </Link>
+                </motion.div>
               ))}
             </nav>
 
@@ -171,13 +180,13 @@ export function Nav() {
                 <Phone size={20} weight="light" className="text-rose" />
                 {site.phoneDisplay}
               </a>
-              <a
+              <Link
                 href="#order"
                 onClick={() => setOpen(false)}
                 className="mt-2 rounded-full bg-rose px-6 py-4 text-center text-base font-semibold text-white active:scale-[0.98]"
               >
                 Оставить заявку
-              </a>
+              </Link>
             </div>
           </motion.div>
         )}
