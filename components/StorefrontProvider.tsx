@@ -8,6 +8,8 @@ type StorefrontState = {
   catalog: StorefrontCatalog | null;
   state: "loading" | "ready" | "unavailable";
   error: string;
+  refreshing: boolean;
+  refreshedAt: number | null;
   cart: CartLine[];
   total: number;
   count: number;
@@ -25,6 +27,8 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   const [catalog, setCatalog] = useState<StorefrontCatalog | null>(null);
   const [state, setState] = useState<StorefrontState["state"]>("loading");
   const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [restored, setRestored] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
@@ -35,9 +39,11 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   const refreshAtExpiry = useRef<(() => Promise<void>) | null>(null);
 
   const refresh = useCallback(async () => {
+    if (!mounted.current) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
+    setRefreshing(true);
     const started = performance.now();
     const timeout = setTimeout(() => controller.abort(), 9000);
     try {
@@ -52,6 +58,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       setCatalog(next);
       setState("ready");
       setError("");
+      setRefreshedAt(Date.now());
       if (expiry.current) clearTimeout(expiry.current);
       expiry.current = setTimeout(() => {
         setState("unavailable");
@@ -63,7 +70,11 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       deadline.current = 0;
       setState("unavailable");
       setError(failure instanceof Error && failure.name !== "AbortError" ? failure.message : "Наличие сейчас уточняется. Попробуйте обновить витрину.");
-    } finally { clearTimeout(timeout); }
+    } finally {
+      clearTimeout(timeout);
+      // An earlier cancelled request must not clear the next request's spinner.
+      if (mounted.current && request.current === controller) setRefreshing(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -139,12 +150,12 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
       else { try { checkoutLines(cart, catalog); } catch (failure) { cartError = failure instanceof Error ? failure.message : "Проверьте выбранные позиции."; } }
     }
     return {
-      catalog, state, error, cart,
+      catalog, state, error, refreshing, refreshedAt, cart,
       total: cart.reduce((sum, line) => sum + (catalog?.items.find((item) => item.id === line.id)?.priceKopecks ?? 0) * line.quantity, 0),
       count: cart.reduce((sum, line) => sum + line.quantity, 0),
       cartError, checkoutPending, setCheckoutPending, refresh, setQuantity, clear, checkout,
     };
-  }, [catalog, state, error, cart, checkoutPending, refresh, setQuantity, clear, checkout]);
+  }, [catalog, state, error, refreshing, refreshedAt, cart, checkoutPending, refresh, setQuantity, clear, checkout]);
   return <StorefrontContext.Provider value={value}>{children}</StorefrontContext.Provider>;
 }
 

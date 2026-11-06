@@ -1,8 +1,9 @@
 import "server-only";
-import { readStebelConfig, type StebelOrder } from "./stebel";
+import { readStebelConfig, stebelConfigProblem, type StebelOrder } from "./stebel";
 import { contactMethodLabels, type OrderInput } from "./schema";
 import { site } from "./site";
 import { parseStorefrontCatalog, type CheckoutLine, type StorefrontCatalog } from "./storefront";
+import { catalogFailureHint, safeCatalogDiagnostic } from "./storefront-diagnostics";
 
 export class StorefrontError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -10,7 +11,12 @@ export class StorefrontError extends Error {
 
 export function storefrontConfig() {
   const config = readStebelConfig();
-  if (!config) throw new StorefrontError(503, "Витрина временно недоступна. Напишите нам — поможем с выбором.");
+  if (!config) {
+    console.error("Stebel storefront configuration failed", {
+      reason: stebelConfigProblem() ?? "STEBEL_API_URL и STEBEL_SITE_KEY не заданы на сервере сайта.",
+    });
+    throw new StorefrontError(503, "Витрина временно недоступна. Напишите нам — поможем с выбором.");
+  }
   return config;
 }
 
@@ -43,12 +49,40 @@ export async function readCapped(response: Response, limit: number): Promise<Uin
 
 export async function getStorefrontCatalog(): Promise<StorefrontCatalog> {
   const cfg = storefrontConfig();
-  const response = await fetch(`${cfg.baseUrl}/site/catalog`, {
-    headers: { "X-Stebel-Key": cfg.key }, cache: "no-store", redirect: "error",
-    signal: AbortSignal.timeout(7000),
-  });
-  if (!response.ok) throw new StorefrontError(503, "Наличие сейчас уточняется. Попробуйте обновить витрину.");
-  return parseStorefrontCatalog(await readJSON(response));
+  const endpoint = `${cfg.baseUrl}/site/catalog`;
+  let response: Response | undefined;
+  let stage = "network";
+  try {
+    response = await fetch(endpoint, {
+      headers: { "X-Stebel-Key": cfg.key }, cache: "no-store", redirect: "error",
+      signal: AbortSignal.timeout(7000),
+    });
+    stage = "http";
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!response.ok) {
+      // Never log arbitrary response bodies: a reverse proxy may return private HTML.
+      await response.body?.cancel();
+      throw new Error(catalogFailureHint(response.status, contentType));
+    }
+    stage = "response";
+    if (!contentType.includes("json")) {
+      await response.body?.cancel();
+      throw new Error(catalogFailureHint(response.status, contentType));
+    }
+    const value = await readJSON(response);
+    stage = "schema";
+    return parseStorefrontCatalog(value);
+  } catch (error) {
+    const cause = error instanceof Error ? error.cause as { code?: unknown } | undefined : undefined;
+    console.error("Stebel storefront catalog failed", {
+      stage, endpoint: safeCatalogDiagnostic(endpoint, cfg.key),
+      status: response?.status ?? null,
+      contentType: response?.headers.get("content-type") ?? null,
+      error: safeCatalogDiagnostic(error instanceof Error ? error.message : "Unknown catalog error", cfg.key),
+      cause: safeCatalogDiagnostic(cause?.code, cfg.key),
+    });
+    throw new StorefrontError(503, "Наличие сейчас уточняется. Попробуйте обновить витрину или напишите флористу.");
+  }
 }
 
 export async function createStorefrontOrder(data: OrderInput, requestId: string, items: CheckoutLine[]): Promise<StebelOrder> {

@@ -1,5 +1,6 @@
 import { contactMethodLabels, type OrderInput } from "./schema";
 import { site } from "./site";
+import { stebelApiBase } from "./stebel-url";
 
 /**
  * Клиент Стебля — CRM магазина. Каждая заявка с сайта становится в Стебле
@@ -160,7 +161,7 @@ function inspectStebelEnv(): StebelSetup {
   return {
     status: "ready",
     config: {
-      baseUrl: `${url.origin}${url.pathname}`.replace(/\/+$/, ""),
+      baseUrl: stebelApiBase(url),
       key,
     },
   };

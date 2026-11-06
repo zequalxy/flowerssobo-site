@@ -13,7 +13,7 @@ import { formatKopecks } from "@/lib/storefront";
 
 export function Showcase() {
   const reduce = useReducedMotion();
-  const { catalog, state, error, refresh } = useStorefront();
+  const { catalog, state, error, refreshing, refreshedAt, refresh } = useStorefront();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<"bouquets" | "flowers">("bouquets");
   const selected = catalog?.items.find((item) => item.id === selectedId);
@@ -29,8 +29,21 @@ export function Showcase() {
         <div className="mt-8 inline-flex max-w-full gap-1 rounded-full border border-line bg-bg-soft p-1" role="group" aria-label="Раздел витрины">
           {([ ["bouquets", "Готовые букеты"], ["flowers", "Собрать свой букет"] ] as const).map(([id, label]) => <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`rounded-full px-4 py-3 text-xs font-semibold transition-colors sm:px-6 sm:text-sm ${tab === id ? "bg-rose text-white" : "text-muted hover:text-ink"}`}>{label}</button>)}
         </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <p role="status" aria-live="polite" aria-atomic="true" className="text-xs text-muted">
+            {refreshing ? "Проверяем актуальное наличие…" : ready && refreshedAt !== null
+              ? `Наличие обновлено в ${new Date(refreshedAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+              : state === "unavailable" ? "Не удалось обновить наличие" : "Загружаем витрину…"}
+          </p>
+          <button type="button" onClick={() => void refresh()} disabled={refreshing}
+            aria-busy={refreshing}
+            className="flex min-h-11 items-center gap-2 rounded-full border border-line px-4 py-2 text-sm font-semibold text-rose transition-colors hover:border-rose/50 disabled:cursor-wait disabled:opacity-60">
+            <ArrowClockwise size={18} aria-hidden="true" className={refreshing ? "animate-spin motion-reduce:animate-none" : ""} />
+            {refreshing ? "Обновляем…" : "Обновить витрину"}
+          </button>
+        </div>
         {state === "loading" ? <div role="status" className="mt-10 rounded-2xl border border-line p-8 text-muted">Проверяем, что есть в студии…</div> : null}
-        {state === "unavailable" ? <div role="status" className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-bg-elev p-5"><p className="text-sm text-muted">{error}</p><button type="button" onClick={() => void refresh()} className="flex items-center gap-2 text-sm font-semibold text-rose"><ArrowClockwise size={18} />Обновить</button><a href="#order" className="text-sm text-muted underline underline-offset-4">Обсудить букет с флористом</a></div> : null}
+        {state === "unavailable" && !refreshing ? <div role="status" className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-line bg-bg-elev p-5"><p className="text-sm text-muted">{error}</p><a href="#order" className="text-sm text-muted underline underline-offset-4">Обсудить букет с флористом</a></div> : null}
         {tab === "bouquets" ? <div className="mt-10 grid grid-cols-2 gap-3 md:mt-12 md:gap-4 lg:grid-cols-3">
           {bouquets.map((item) => <ProductCard key={item.id} product={item} onOpen={(item) => setSelectedId(item.id)} reduce={reduce} ready={ready} />)}
           {ready && !bouquets.length ? <p className="col-span-full rounded-2xl border border-line p-8 text-muted">Сейчас свободных готовых букетов нет. Выберите цветы во вкладке «Собрать свой букет» или расскажите флористу о своих пожеланиях.</p> : null}
