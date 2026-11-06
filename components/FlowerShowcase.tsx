@@ -52,9 +52,7 @@ export function FlowerShowcase() {
           ))}
         </ol>
 
-        <div className="mt-8 border-t border-line pt-1">
-          <StorefrontStatus />
-        </div>
+        <StorefrontStatus />
 
         <div className="mt-6 grid grid-cols-2 gap-3 md:mt-8 md:gap-4 lg:grid-cols-4">
           {flowers.map((item) => {
