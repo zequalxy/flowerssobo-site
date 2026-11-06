@@ -13,6 +13,7 @@ import {
   Phone,
 } from "@phosphor-icons/react/dist/ssr";
 import { site } from "@/lib/site";
+import { useStorefront } from "./StorefrontProvider";
 
 const actions = [
   { icon: WhatsappLogo, href: site.whatsapp, label: "Написать в WhatsApp" },
@@ -22,6 +23,7 @@ const actions = [
 ];
 
 export function FloatingContacts() {
+  const { cart } = useStorefront();
   const [visible, setVisible] = useState(false);
   const { scrollY } = useScroll();
 
@@ -36,7 +38,7 @@ export function FloatingContacts() {
   }, []);
 
   return (
-    <div className="fixed bottom-5 right-5 z-40 flex flex-col gap-3 md:bottom-7 md:right-7">
+    <div className={`fixed right-5 z-40 flex flex-col gap-3 md:right-7 ${cart.length ? "bottom-24 md:bottom-28" : "bottom-5 md:bottom-7"}`}>
       <AnimatePresence>
         {visible &&
           actions.map((a, i) => (
@@ -64,3 +66,4 @@ export function FloatingContacts() {
     </div>
   );
 }
+

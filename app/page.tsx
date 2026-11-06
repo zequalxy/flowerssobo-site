@@ -9,10 +9,12 @@ import { OrderForm } from "@/components/OrderForm";
 import { Contacts } from "@/components/Contacts";
 import { Footer } from "@/components/Footer";
 import { FloatingContacts } from "@/components/FloatingContacts";
+import { StorefrontProvider } from "@/components/StorefrontProvider";
+import { StorefrontCart } from "@/components/StorefrontCart";
 
 export default function Home() {
   return (
-    <>
+    <StorefrontProvider>
       <Nav />
       <main>
         <Hero />
@@ -26,6 +28,8 @@ export default function Home() {
       </main>
       <Footer />
       <FloatingContacts />
-    </>
+      <StorefrontCart sticky />
+    </StorefrontProvider>
   );
 }
+

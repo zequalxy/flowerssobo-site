@@ -28,6 +28,15 @@ import {
 import { categoryOptions } from "@/lib/catalog";
 import { site } from "@/lib/site";
 import { cn } from "@/lib/utils";
+import { useStorefront } from "./StorefrontProvider";
+import { StorefrontCart } from "./StorefrontCart";
+import { clearStorefrontRequest, definitiveStorefrontFailure, prepareStorefrontSubmission, type StorefrontSubmission } from "@/lib/storefront-request";
+import { formatKopecks, type CheckoutLine } from "@/lib/storefront";
+
+type SelectionPayload = OrderInput & { items: CheckoutLine[] };
+type PendingSelection = StorefrontSubmission<SelectionPayload> & {
+  summary: { name: string; quantity: number; priceKopecks: number }[];
+};
 
 const inputClass =
   "w-full rounded-xl border bg-bg-soft px-4 py-3 text-sm text-ink placeholder:text-faint outline-none transition-colors duration-200";
@@ -220,6 +229,11 @@ function CustomSelect({
 
 export function OrderForm() {
   const [done, setDone] = useState(false);
+  const [requestNumber, setRequestNumber] = useState<number | null>(null);
+  const storefront = useStorefront();
+  const [pendingRequest, setPendingRequest] = useState<PendingSelection | null>(null);
+  const [pendingProblem, setPendingProblem] = useState("");
+  const [sending, setSending] = useState(false);
 
   const {
     register,
@@ -249,6 +263,7 @@ export function OrderForm() {
 
   const applyPrefill = useCallback(
     (next: { category?: string; comment?: string }) => {
+      if (pendingRequest) return;
       if (next.category) setValue("category", next.category);
 
       const prev = autoComment.current;
@@ -268,7 +283,7 @@ export function OrderForm() {
       );
       autoComment.current = added;
     },
-    [getValues, setValue],
+    [getValues, setValue, pendingRequest],
   );
 
   // Pre-fill when a catalog card (string) or a bouquet card (object) is clicked.
@@ -286,32 +301,73 @@ export function OrderForm() {
     return () => window.removeEventListener("flowerssobo:prefill", onPrefill);
   }, [applyPrefill]);
 
-  async function onSubmit(data: OrderInput) {
-    let message =
-      "Не удалось отправить. Позвоните нам или напишите в мессенджер.";
+  async function sendRequest(data: OrderInput, submitted: PendingSelection | null) {
+    if (sending) return;
+    setSending(true);
+    setPendingProblem("");
+    let uncertain = Boolean(submitted);
+    let message = "Не удалось отправить. Позвоните нам или напишите в мессенджер.";
     try {
-      const res = await fetch("/api/order", {
+      const response = await fetch(submitted ? "/api/storefront/order" : "/api/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-        // Без таймаута зависшая сеть крутила бы «Отправляем…» бесконечно.
+        body: JSON.stringify(submitted ? { ...submitted.payload, requestId: submitted.requestId } : data),
         signal: AbortSignal.timeout(15_000),
       });
-      const json = (await res.json()) as { ok: boolean; error?: string };
-      if (!res.ok || !json.ok) {
-        // Сервер отвечает понятной фразой (лимит заявок, сбой доставки) —
-        // её и показываем; сеть/таймаут/не-JSON остаются с общей фразой.
-        if (json.error) message = json.error;
+      const result = await response.json() as { ok: boolean; error?: string; number?: number | null };
+      if (!response.ok || !result.ok) {
+        if (result.error) message = result.error;
+        if (submitted && definitiveStorefrontFailure(response.status)) {
+          uncertain = false;
+          setPendingRequest(null);
+          storefront.setCheckoutPending(false);
+          clearStorefrontRequest();
+          void storefront.refresh();
+        }
         throw new Error("order rejected");
       }
-
+      uncertain = false;
       toast.success("Заявка отправлена! Скоро свяжемся.");
-      // Строку, подставленную из витрины, чистить не нужно: reset() обнулил
-      // поле, и applyPrefill её уже не найдёт.
       reset();
+      if (submitted) {
+        setPendingRequest(null);
+        storefront.setCheckoutPending(false);
+        storefront.clear();
+        clearStorefrontRequest();
+      }
+      setRequestNumber(result.number ?? null);
       setDone(true);
     } catch {
+      if (uncertain) {
+        setPendingProblem("Не получили подтверждение сохранения. Заявка могла уже попасть к флористу. Повторите проверку — отправим тот же выбор без дубликата.");
+      }
       toast.error(message);
+    } finally { setSending(false); }
+  }
+
+  async function onSubmit(data: OrderInput) {
+    // An unresolved attempt is replayed before consulting changing stock or prices.
+    if (pendingRequest) {
+      await sendRequest(pendingRequest.payload, pendingRequest);
+      return;
+    }
+    if (!storefront.cart.length) { await sendRequest(data, null); return; }
+    if (storefront.cartError) { toast.error(storefront.cartError); return; }
+    try {
+      const items = storefront.checkout();
+      const submission = await prepareStorefrontSubmission({ ...data, items }, null);
+      const pending: PendingSelection = {
+        ...submission,
+        summary: items.map((line) => ({
+          name: storefront.catalog?.items.find((item) => item.id === line.id)?.name ?? "Выбранная позиция",
+          quantity: line.quantity, priceKopecks: line.priceKopecks,
+        })),
+      };
+      setPendingRequest(pending);
+      storefront.setCheckoutPending(true);
+      await sendRequest(pending.payload, pending);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Обновите наличие в витрине.");
     }
   }
 
@@ -354,16 +410,25 @@ export function OrderForm() {
           </p>
 
           <div className="mt-8 rounded-[1.75rem] border border-line bg-bg-elev/70 p-6 shadow-card md:p-9">
-            {done ? (
+            {pendingRequest ? (
+              <div role="status" className="mb-6 rounded-2xl border border-rose/30 bg-bg-soft p-5">
+                <h3 className="font-display text-xl">Отправленная заявка</h3>
+                <ul className="mt-3 space-y-2 text-sm text-muted">{pendingRequest.summary.map((line, index) => <li key={index} className="flex justify-between gap-3"><span>{line.name} · {line.quantity}</span><span className="shrink-0 tabular-nums">{formatKopecks(line.priceKopecks * line.quantity)}</span></li>)}</ul>
+                <p className="mt-4 text-sm leading-relaxed text-muted">{pendingProblem || "Проверяем сохранение заявки…"}</p>
+                {pendingProblem ? <button type="button" disabled={sending} onClick={() => void sendRequest(pendingRequest.payload, pendingRequest)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-rose px-5 py-3 text-sm font-semibold text-white hover:bg-rose-deep disabled:opacity-50">{sending ? "Проверяем…" : "Повторить проверку заявки"}</button> : null}
+                <p className="mt-3 text-xs text-faint">До получения ответа сохраняем отправленный состав и цены. Если связь не восстановится, <a href={site.phoneHref} className="underline">позвоните нам</a> для проверки заявки.</p>
+              </div>
+            ) : <StorefrontCart />}
+            {done && storefront.cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <span className="flex size-16 items-center justify-center rounded-full bg-rose/15 text-rose">
                   <CheckCircle size={40} weight="light" />
                 </span>
                 <h3 className="mt-6 font-display text-3xl text-ink">
-                  Спасибо! Заявка у нас
+                  Спасибо! Заявка{requestNumber ? ` № ${requestNumber}` : ""} у нас
                 </h3>
                 <p className="mt-3 max-w-sm text-pretty text-muted">
-                  Менеджер свяжется с вами в ближайшее время и поможет с выбором.
+                  Флорист свяжется с вами, подтвердит наличие и согласует получение. Цветы будут закреплены за вами после подтверждения.
                 </p>
                 <button
                   type="button"
@@ -379,6 +444,7 @@ export function OrderForm() {
                 noValidate
                 className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2"
               >
+                <fieldset disabled={Boolean(pendingRequest) || sending} className="contents">
                 <Field
                   label="ФИО"
                   required
@@ -561,10 +627,10 @@ export function OrderForm() {
                 <div className="sm:col-span-2">
                   <button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || sending || Boolean(pendingRequest) || Boolean(storefront.cartError)}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-rose px-6 py-4 text-sm font-semibold text-white transition-colors duration-200 hover:bg-rose-deep active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-70"
                   >
-                    {isSubmitting ? (
+                    {isSubmitting || sending ? (
                       <>
                         <CircleNotch size={18} weight="bold" className="animate-spin" />
                         Отправляем…
@@ -577,6 +643,7 @@ export function OrderForm() {
                     )}
                   </button>
                 </div>
+                </fieldset>
               </form>
             )}
           </div>
@@ -585,3 +652,4 @@ export function OrderForm() {
     </section>
   );
 }
+
