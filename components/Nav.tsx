@@ -91,6 +91,7 @@ export function Nav() {
           <div className="hidden items-center gap-5 xl:flex">
             <a
               href={site.phoneHref}
+              data-analytics-event="phone_click"
               className={cn(
                 "text-sm font-medium transition-colors duration-200",
                 solid
@@ -175,6 +176,7 @@ export function Nav() {
             <div className="flex flex-col gap-3 px-6 pb-10">
               <a
                 href={site.phoneHref}
+                data-analytics-event="phone_click"
                 className="flex items-center gap-3 text-lg text-ink"
               >
                 <Phone size={20} weight="light" className="text-rose" />

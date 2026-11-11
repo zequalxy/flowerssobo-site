@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CATALOG_REFRESH_MS, MAX_CART_LINES, MAX_ITEM_QUANTITY, UUID, catalogLifetime, checkoutLines, type CartLine, type CheckoutLine, type StorefrontCatalog, type StorefrontItem } from "@/lib/storefront";
+import { cartIncreaseMetrics } from "@/lib/analytics";
+import { trackAnalytics } from "./AnalyticsProvider";
 
 const CART_KEY = "flowerssobo:cart:v1";
 type StorefrontState = {
@@ -30,6 +32,7 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const cartRef = useRef<CartLine[]>([]);
   const [restored, setRestored] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
   const request = useRef<AbortController | null>(null);
@@ -104,12 +107,14 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
         const saved: unknown = JSON.parse(sessionStorage.getItem(CART_KEY) ?? "[]");
         if (Array.isArray(saved) && saved.length <= MAX_CART_LINES) {
           const seen = new Set<string>();
-          setCart(saved.filter((line): line is CartLine => {
+          const restoredCart = saved.filter((line): line is CartLine => {
             if (!line || typeof line !== "object" || typeof line.id !== "string" || !UUID.test(line.id) ||
                 !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > MAX_ITEM_QUANTITY || seen.has(line.id)) return false;
             seen.add(line.id);
             return true;
-          }).map(({ id, quantity }) => ({ id, quantity })));
+          }).map(({ id, quantity }) => ({ id, quantity }));
+          cartRef.current = restoredCart;
+          setCart(restoredCart);
         }
       } catch { /* Storage may be disabled; an in-memory cart remains usable. */ }
       setRestored(true);
@@ -125,19 +130,26 @@ export function StorefrontProvider({ children }: { children: ReactNode }) {
   const setQuantity = useCallback((id: string, quantity: number) => {
     if (checkoutPending) return;
     if (!Number.isSafeInteger(quantity)) return;
-    setCart((previous) => {
-      if (quantity <= 0) return previous.filter((line) => line.id !== id);
-      const item = catalog?.items.find((candidate) => candidate.id === id);
-      if (!item || state !== "ready" || performance.now() >= deadline.current || item.priceKopecks === null || item.priceKopecks < 1) return previous;
-      const next = Math.min(quantity, item.available, MAX_ITEM_QUANTITY);
-      if (next <= 0) return previous;
-      if (previous.some((line) => line.id === id)) return previous.map((line) => line.id === id ? { id, quantity: next } : line);
-      if (previous.length >= MAX_CART_LINES) return previous;
-      return [...previous, { id, quantity: next }];
-    });
+    const previous = cartRef.current;
+    if (quantity <= 0) {
+      cartRef.current = previous.filter((line) => line.id !== id);
+      setCart(cartRef.current);
+      return;
+    }
+    const item = catalog?.items.find((candidate) => candidate.id === id);
+    if (!item || state !== "ready" || performance.now() >= deadline.current || item.priceKopecks === null || item.priceKopecks < 1) return;
+    const next = Math.min(quantity, item.available, MAX_ITEM_QUANTITY);
+    if (next <= 0) return;
+    const line = previous.find((candidate) => candidate.id === id);
+    if (!line && previous.length >= MAX_CART_LINES) return;
+    cartRef.current = line ? previous.map((candidate) => candidate.id === id ? { id, quantity: next } : candidate) : [...previous, { id, quantity: next }];
+    setCart(cartRef.current);
+    // After validation and outside React's replayable state updater. Restoration,
+    // removals, rejected quantities and stock clamps never imply a new addition.
+    for (const metric of cartIncreaseMetrics(line?.quantity ?? 0, next, item.kind)) trackAnalytics(metric);
   }, [catalog, state, checkoutPending]);
 
-  const clear = useCallback(() => setCart([]), []);
+  const clear = useCallback(() => { cartRef.current = []; setCart([]); }, []);
   const checkout = useCallback(() => {
     if (!catalog || state !== "ready" || performance.now() >= deadline.current) throw new Error("Сначала обновите наличие в витрине.");
     return checkoutLines(cart, catalog);

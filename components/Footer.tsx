@@ -14,10 +14,10 @@ import { TwoGisIcon } from "@/components/ui/TwoGisIcon";
  * не путались: самолётик = написать нам, мегафон = канал с работами.
  */
 const socials = [
-  { icon: TelegramLogo, href: site.telegramChat, label: "Написать в Telegram" },
-  { icon: Megaphone, href: site.telegram, label: "Telegram-канал" },
+  { icon: TelegramLogo, href: site.telegramChat, label: "Написать в Telegram", metric: "telegram_click" },
+  { icon: Megaphone, href: site.telegram, label: "Telegram-канал", metric: "telegram_click" },
   { icon: WhatsappLogo, href: site.whatsapp, label: "WhatsApp" },
-  { icon: InstagramLogo, href: site.instagram, label: "Instagram", star: true },
+  { icon: InstagramLogo, href: site.instagram, label: "Instagram", star: true, metric: "instagram_click" },
   { icon: TwoGisIcon, href: site.twoGis, label: "2ГИС" },
 ];
 
@@ -50,6 +50,7 @@ export function Footer() {
           <div className="flex max-w-sm flex-col gap-4">
             <a
               href={site.phoneHref}
+              data-analytics-event="phone_click"
               className="font-display text-2xl text-ink transition-colors hover:text-rose"
             >
               {site.phoneDisplay}
@@ -59,6 +60,7 @@ export function Footer() {
                 <a
                   key={s.label}
                   href={s.href}
+                  data-analytics-event={s.metric}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="group inline-flex items-center gap-2 rounded-full border border-line px-3.5 py-2 text-sm text-ink/80 transition-colors duration-200 hover:border-rose/60 hover:text-rose"

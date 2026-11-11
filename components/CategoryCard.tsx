@@ -27,6 +27,7 @@ export function CategoryCard({
   return (
     <motion.button
       type="button"
+      data-analytics-event={`category_${category.slug}`}
       onClick={() => onOpen(category)}
       aria-label={`${category.title} — подробнее`}
       layoutId={reduce ? undefined : `cat-${category.slug}`}

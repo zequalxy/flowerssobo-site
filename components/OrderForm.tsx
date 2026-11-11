@@ -32,6 +32,7 @@ import { useStorefront } from "./StorefrontProvider";
 import { StorefrontCart } from "./StorefrontCart";
 import { clearStorefrontRequest, definitiveStorefrontFailure, prepareStorefrontSubmission, type StorefrontSubmission } from "@/lib/storefront-request";
 import { formatKopecks, type CheckoutLine } from "@/lib/storefront";
+import { trackAnalytics } from "./AnalyticsProvider";
 
 type SelectionPayload = OrderInput & { items: CheckoutLine[] };
 type PendingSelection = StorefrontSubmission<SelectionPayload> & {
@@ -308,6 +309,7 @@ export function OrderForm() {
     let uncertain = Boolean(submitted);
     let message = "Не удалось отправить. Позвоните нам или напишите в мессенджер.";
     try {
+      if (!data.extraField) trackAnalytics("order_submit");
       const response = await fetch(submitted ? "/api/storefront/order" : "/api/order", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -327,6 +329,8 @@ export function OrderForm() {
         throw new Error("order rejected");
       }
       uncertain = false;
+      // Honeypot submissions deliberately receive a fake success from the API.
+      if (!data.extraField) trackAnalytics("order_success");
       toast.success("Заявка отправлена! Скоро свяжемся.");
       reset();
       if (submitted) {
@@ -389,6 +393,7 @@ export function OrderForm() {
               <p className="text-sm text-white/80">Хотите голосом? Звоните:</p>
               <a
                 href={site.phoneHref}
+                data-analytics-event="phone_click"
                 className="mt-1 inline-block font-display text-2xl text-white transition-colors hover:text-rose md:text-3xl"
               >
                 {site.phoneDisplay}
@@ -416,7 +421,7 @@ export function OrderForm() {
                 <ul className="mt-3 space-y-2 text-sm text-muted">{pendingRequest.summary.map((line, index) => <li key={index} className="flex justify-between gap-3"><span>{line.name} · {line.quantity}</span><span className="shrink-0 tabular-nums">{formatKopecks(line.priceKopecks * line.quantity)}</span></li>)}</ul>
                 <p className="mt-4 text-sm leading-relaxed text-muted">{pendingProblem || "Проверяем сохранение заявки…"}</p>
                 {pendingProblem ? <button type="button" disabled={sending} onClick={() => void sendRequest(pendingRequest.payload, pendingRequest)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-rose px-5 py-3 text-sm font-semibold text-white hover:bg-rose-deep disabled:opacity-50">{sending ? "Проверяем…" : "Повторить проверку заявки"}</button> : null}
-                <p className="mt-3 text-xs text-faint">До получения ответа сохраняем отправленный состав и цены. Если связь не восстановится, <a href={site.phoneHref} className="underline">позвоните нам</a> для проверки заявки.</p>
+                <p className="mt-3 text-xs text-faint">До получения ответа сохраняем отправленный состав и цены. Если связь не восстановится, <a href={site.phoneHref} data-analytics-event="phone_click" className="underline">позвоните нам</a> для проверки заявки.</p>
               </div>
             ) : <StorefrontCart />}
             {done && storefront.cart.length === 0 ? (
@@ -440,6 +445,7 @@ export function OrderForm() {
               </div>
             ) : (
               <form
+                data-analytics-order
                 onSubmit={handleSubmit(onSubmit)}
                 noValidate
                 className="grid grid-cols-1 gap-x-4 gap-y-5 sm:grid-cols-2"

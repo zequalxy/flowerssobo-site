@@ -18,7 +18,7 @@ const LOOP_DURATION = 48;
 
 export function Reviews() {
   return (
-    <section className="relative overflow-hidden py-24 md:py-32">
+    <section data-analytics-view="reviews_view" className="relative overflow-hidden py-24 md:py-32">
       <div className="mx-auto max-w-[1400px] px-5 md:px-10">
         <Reveal>
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">

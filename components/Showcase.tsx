@@ -20,7 +20,7 @@ export function Showcase() {
   const ready = state === "ready";
 
   return (
-    <section id="bouquets" className="relative scroll-mt-24 py-24 md:py-32">
+    <section id="bouquets" data-analytics-view="bouquets_view" className="relative scroll-mt-24 py-24 md:py-32">
       <div className="mx-auto max-w-[1400px] px-5 md:px-10">
         <Reveal>
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">

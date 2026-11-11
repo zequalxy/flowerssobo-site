@@ -18,8 +18,8 @@ import { useStorefront } from "./StorefrontProvider";
 const actions = [
   { icon: WhatsappLogo, href: site.whatsapp, label: "Написать в WhatsApp" },
   // Личный диалог (не канал) — виджет = «написать нам».
-  { icon: TelegramLogo, href: site.telegramChat, label: "Написать в Telegram" },
-  { icon: Phone, href: site.phoneHref, label: "Позвонить" },
+  { icon: TelegramLogo, href: site.telegramChat, label: "Написать в Telegram", metric: "telegram_click" },
+  { icon: Phone, href: site.phoneHref, label: "Позвонить", metric: "phone_click" },
 ];
 
 export function FloatingContacts() {
@@ -45,6 +45,7 @@ export function FloatingContacts() {
             <motion.a
               key={a.label}
               href={a.href}
+              data-analytics-event={a.metric}
               target={a.href.startsWith("http") ? "_blank" : undefined}
               rel="noopener noreferrer"
               aria-label={a.label}

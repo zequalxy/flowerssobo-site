@@ -43,7 +43,7 @@ export function Categories() {
   const close = useCallback(() => setSelected(null), []);
 
   return (
-    <section id="catalog" className="relative py-24 md:py-32">
+    <section id="catalog" data-analytics-view="categories_view" className="relative py-24 md:py-32">
       <div className="mx-auto max-w-[1400px] px-5 md:px-10">
         <Reveal>
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">

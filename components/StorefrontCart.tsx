@@ -41,14 +41,14 @@ export function StorefrontCart({ sticky = false }: { sticky?: boolean }) {
   if (sticky && atForm) return null;
   if (sticky) return (
     <div className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md pb-[env(safe-area-inset-bottom)] md:bottom-6">
-      <a href="#order" className="flex items-center justify-between gap-4 rounded-full border border-rose/40 bg-rose px-5 py-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] transition-colors hover:bg-rose-deep">
+      <a href="#order" data-analytics-event="cart_view" className="flex items-center justify-between gap-4 rounded-full border border-rose/40 bg-rose px-5 py-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] transition-colors hover:bg-rose-deep">
         <span className="flex items-center gap-2 text-sm font-semibold"><ShoppingBag size={21} />{checkoutPending ? "Проверить отправку заявки" : onlyCustomBouquet ? "Мой букет" : "Мой выбор"}</span>
         <span className="flex items-center gap-2 text-sm font-semibold tabular-nums">{checkoutPending ? null : formatKopecks(total)}<ArrowRight size={18} /></span>
       </a>
     </div>
   );
   return (
-    <div className="mb-6 rounded-2xl border border-line bg-bg-soft p-4 sm:p-5">
+    <div data-analytics-view="cart_view" className="mb-6 rounded-2xl border border-line bg-bg-soft p-4 sm:p-5">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-display text-xl">Ваш выбор</h3>
         <button type="button" disabled={checkoutPending} onClick={clear} className="text-xs text-muted underline underline-offset-4 hover:text-rose disabled:opacity-40">Очистить</button>

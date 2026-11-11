@@ -15,6 +15,7 @@ export function ProductCard({ product, onOpen, reduce, ready }: {
   return (
     <motion.button
       type="button" onClick={() => onOpen(product)}
+      data-analytics-event="bouquet_open"
       aria-label={`${product.name} — ${product.priceKopecks === null ? "цена уточняется" : formatKopecks(product.priceKopecks)}`}
       layout={!reduce} layoutId={reduce ? undefined : `card-${product.id}`}
       initial={reduce ? false : { opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }}

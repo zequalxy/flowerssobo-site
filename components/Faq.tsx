@@ -49,7 +49,7 @@ export function Faq() {
   };
 
   return (
-    <section id="faq" className="relative scroll-mt-24 bg-bg-soft py-24 md:py-32">
+    <section id="faq" data-analytics-view="faq_view" className="relative scroll-mt-24 bg-bg-soft py-24 md:py-32">
       {/* Static local data; "<" escaped per the Next.js JSON-LD recipe. */}
       <script
         type="application/ld+json"
@@ -73,6 +73,7 @@ export function Faq() {
             </p>
             <a
               href={site.phoneHref}
+              data-analytics-event="phone_click"
               className="mt-8 inline-flex items-center gap-3 font-display text-2xl text-ink transition-colors hover:text-rose md:text-3xl"
             >
               <Phone size={22} weight="light" className="text-rose" />

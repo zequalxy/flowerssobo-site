@@ -8,7 +8,7 @@ import { Reveal } from "@/components/ui/Reveal";
  */
 export function Season() {
   return (
-    <section id="season" className="relative scroll-mt-24 py-24 md:py-32">
+    <section id="season" data-analytics-view="season_view" className="relative scroll-mt-24 py-24 md:py-32">
       <div className="mx-auto grid max-w-[1400px] grid-cols-1 items-center gap-12 px-5 md:px-10 lg:grid-cols-2 lg:gap-20">
         {/* Фото витрины целиком, в исходных горизонтальных пропорциях 4:3. */}
         <Reveal className="order-1">
